@@ -1,0 +1,17 @@
+txt_bruto/*
+!txt_bruto/.gitkeep
+
+planilhas/*
+!planilhas/.gitkeep
+
+jsons_mesclados/*
+!jsons_mesclados/.gitkeep
+
+json_final/*
+!json_final/.gitkeep
+
+configs/*
+!configs/.gitkeep
+
+logs/*
+!logs/.gitkeep
