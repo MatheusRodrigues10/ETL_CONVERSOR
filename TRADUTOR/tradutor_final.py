@@ -63,26 +63,21 @@ class TradutorFinal:
             return match.group(1)
         return None
 
-    def _obter_nome_saida(self):
+    def _obter_nome_saida(self, nome_arquivo_json):
         """
-        Obtem o nome para o arquivo de saida baseado nos JSONs disponiveis
-        Se houver multiplos arquivos, usa o primeiro encontrado
+        Obtem o nome para o arquivo de saida baseado no nome do arquivo JSON
         """
-        arquivos_json = [f for f in os.listdir(self.pasta_json) if f.endswith('.json')]
+        # Remove extensão .json
+        nome_base = os.path.splitext(nome_arquivo_json)[0]
         
-        if not arquivos_json:
-            raise FileNotFoundError("Nenhum arquivo .json encontrado em 'jsons/'")
-        
-        # Tenta extrair nome do primeiro arquivo JSON
-        primeiro_arquivo = arquivos_json[0]
-        nome_extraido = self._extrair_nome_arquivo(primeiro_arquivo)
+        # Tenta extrair nome do padrao saida_{NOME}.json
+        nome_extraido = self._extrair_nome_arquivo(nome_arquivo_json)
         
         if nome_extraido:
             logger.info(f"Nome extraido do JSON: {nome_extraido}")
             return nome_extraido
         else:
             # Se nao encontrar o padrao, usa o nome do arquivo sem extensao
-            nome_base = os.path.splitext(primeiro_arquivo)[0]
             logger.info(f"Usando nome base do arquivo: {nome_base}")
             return nome_base
 
@@ -137,32 +132,27 @@ class TradutorFinal:
         
         return colunas, valores_padrao
 
-    def _ler_jsons(self):
-        """Le todos os JSONs da pasta jsons"""
-        jsons = []
+    def _ler_json_arquivo(self, nome_arquivo):
+        """Le um arquivo JSON especifico"""
+        path = os.path.join(self.pasta_json, nome_arquivo)
+        try:
+            with open(path, 'r', encoding='utf-8') as f:
+                dados = json.load(f)
+                if isinstance(dados, list):
+                    return dados
+                elif isinstance(dados, dict):
+                    return [dados]
+                return []
+        except Exception as e:
+            logger.error(f"Erro ao ler {nome_arquivo}: {e}")
+            return []
+    
+    def _listar_arquivos_json(self):
+        """Lista todos os arquivos JSON da pasta jsons"""
         arquivos = [f for f in os.listdir(self.pasta_json) if f.endswith('.json')]
         if not arquivos:
             raise FileNotFoundError("Nenhum arquivo .json encontrado em 'jsons/'")
-
-        for arq in arquivos:
-            path = os.path.join(self.pasta_json, arq)
-            try:
-                with open(path, 'r', encoding='utf-8') as f:
-                    dados = json.load(f)
-                    if isinstance(dados, list):
-                        jsons.extend(dados)
-                    elif isinstance(dados, dict):
-                        jsons.append(dados)
-                    logger.info(f"Lido com sucesso: {arq}")
-            except Exception as e:
-                logger.error(f"Erro ao ler {arq}: {e}")
-        
-        df = pd.DataFrame(jsons)
-        
-        # Aplica limpeza de texto nos dados lidos
-        df = self._limpar_dataframe(df)
-        
-        return df
+        return arquivos
 
     def _gerar_cod_classificacao_fis(self, df):
         """
@@ -563,19 +553,30 @@ class TradutorFinal:
         df = df[colunas]
         return df
 
-    def processar(self):
-        """Executa o pipeline completo"""
-        logger.info("\nIniciando traducao final dos JSONs...")
+    def _processar_arquivo_json(self, nome_arquivo_json):
+        """Processa um arquivo JSON individual e gera o Excel correspondente"""
+        logger.info(f"\n{'='*60}")
+        logger.info(f"Processando arquivo: {nome_arquivo_json}")
+        logger.info(f"{'='*60}")
 
         # 1. Obtem nome para o arquivo de saida
-        nome_saida = self._obter_nome_saida()
+        nome_saida = self._obter_nome_saida(nome_arquivo_json)
 
         # 2. Le gabarito
         colunas, valores_padrao = self._carregar_gabarito()
 
-        # 3. Le JSONs
-        df_json = self._ler_jsons()
+        # 3. Le JSON especifico
+        dados_json = self._ler_json_arquivo(nome_arquivo_json)
+        
+        if not dados_json:
+            logger.warning(f"Nenhum dado encontrado em {nome_arquivo_json}. Pulando...")
+            return 0
+        
+        df_json = pd.DataFrame(dados_json)
         logger.info(f"Total de registros lidos: {len(df_json)}")
+        
+        # Aplica limpeza de texto nos dados lidos
+        df_json = self._limpar_dataframe(df_json)
 
         # 4. Gera COD_CLASSIFICACAO_FIS automaticamente (com cache persistente)
         df_json = self._gerar_cod_classificacao_fis(df_json)
@@ -583,6 +584,10 @@ class TradutorFinal:
         # 5. Filtra produtos invalidos (sem precos validos)
         df_json = self._filtrar_produtos_invalidos(df_json)
         logger.info(f"Apos filtragem: {len(df_json)} registros")
+
+        if len(df_json) == 0:
+            logger.warning(f"Nenhum registro valido apos filtragem em {nome_arquivo_json}. Pulando...")
+            return 0
 
         # 6. Renumera COD_PRODUTO sequencialmente
         df_json = self._renumerar_cod_produto(df_json)
@@ -593,7 +598,7 @@ class TradutorFinal:
         # 8. Corrige e preenche
         df_final = self._corrigir_valores(df_json, colunas, valores_padrao)
 
-        # 9. Salva resultado SEM mesclar celulas - APENAS COM O NOME EXTRAIDO
+        # 9. Salva resultado SEM mesclar celulas
         path_saida = os.path.join(self.pasta_saida, f"{nome_saida}.xlsx")
         
         # Usa ExcelWriter com opcoes especificas para evitar mesclagem
@@ -627,9 +632,43 @@ class TradutorFinal:
         logger.info(f"\nPlanilha final gerada com sucesso em: {path_saida}")
         logger.info(f"{len(df_final)} registros exportados")
         logger.info(f"Celulas NAO mescladas - cada linha independente")
-        
-        # Log final mostrando que zeros foram preservados
         logger.info(f"Valores padrao com zeros preservados (ex: '001', '0001')")
+        
+        return len(df_final)
+
+    def processar(self):
+        """Executa o pipeline completo para todos os arquivos JSON"""
+        logger.info("\n" + "="*60)
+        logger.info("INICIANDO TRADUCAO FINAL DOS JSONs")
+        logger.info("="*60)
+
+        # Lista todos os arquivos JSON
+        arquivos_json = self._listar_arquivos_json()
+        logger.info(f"\nArquivos JSON encontrados: {len(arquivos_json)}")
+        for arq in arquivos_json:
+            logger.info(f"  - {arq}")
+
+        total_processados = 0
+        total_registros = 0
+
+        # Processa cada arquivo JSON separadamente
+        for nome_arquivo in arquivos_json:
+            try:
+                registros = self._processar_arquivo_json(nome_arquivo)
+                if registros > 0:
+                    total_processados += 1
+                    total_registros += registros
+            except Exception as e:
+                logger.error(f"Erro ao processar {nome_arquivo}: {e}")
+                import traceback
+                logger.error(traceback.format_exc())
+                continue
+
+        logger.info(f"\n{'='*60}")
+        logger.info(f"CONCLUIDO")
+        logger.info(f"{'='*60}")
+        logger.info(f"Total de arquivos processados: {total_processados}/{len(arquivos_json)}")
+        logger.info(f"Total de registros exportados: {total_registros}")
 
 if __name__ == "__main__":
     tradutor = TradutorFinal()

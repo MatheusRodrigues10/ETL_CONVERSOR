@@ -18,8 +18,12 @@ class ConversorPlanilhasTXT:
         self.pasta_destino = Path(pasta_destino)
         self.pasta_destino.mkdir(parents=True, exist_ok=True)
     
+    def normalizar_nome(self, nome):
+        """Normaliza nome para comparação (remove caracteres especiais e converte para minúsculas)"""
+        return re.sub(r'[^a-zA-Z0-9]', '', str(nome).lower().strip())
+    
     def encontrar_config(self):
-        """Encontra automaticamente o primeiro arquivo JSON na pasta configs"""
+        """Encontra automaticamente o primeiro arquivo JSON na pasta configs (fallback)"""
         config_dir = Path('./configs')
         if not config_dir.exists():
             logging.error("Pasta configs não encontrada")
@@ -31,8 +35,91 @@ class ConversorPlanilhasTXT:
             exit(1)
         
         config_path = config_files[0]
-        logging.info(f"Usando configuração: {config_path}")
+        logging.info(f"Usando configuração padrão: {config_path}")
         return config_path
+    
+    def encontrar_config_para_arquivo(self, nome_arquivo_excel):
+        """Encontra o config apropriado baseado no arquivo Excel sendo processado"""
+        config_dir = Path('./configs')
+        if not config_dir.exists():
+            logging.error("Pasta configs não encontrada")
+            exit(1)
+            
+        config_files = list(config_dir.glob('*.json'))
+        if not config_files:
+            logging.error("Nenhum arquivo JSON encontrado em ./configs/")
+            exit(1)
+        
+        # Remove extensão do arquivo Excel e normaliza
+        nome_arquivo_sem_ext = Path(nome_arquivo_excel).stem
+        nome_arquivo_limpo = self.normalizar_nome(nome_arquivo_sem_ext)
+        
+        # Lista para armazenar correspondências encontradas (config, score de correspondência, nome, tipo)
+        correspondencias = []
+        
+        for config_file in config_files:
+            try:
+                with open(config_file, 'r', encoding='utf-8') as f:
+                    config_temp = json.load(f)
+                
+                # Verifica se algum arquivo definido no config corresponde ao arquivo Excel
+                if 'files' in config_temp:
+                    for tipo, info in config_temp['files'].items():
+                        if 'path' in info:
+                            nome_xlsx = Path(info['path']).stem
+                            nome_xlsx_limpo = self.normalizar_nome(nome_xlsx)
+                            
+                            # Calcula score de correspondência (quanto maior, melhor)
+                            score = 0
+                            
+                            # Correspondência exata = score máximo
+                            if nome_xlsx_limpo == nome_arquivo_limpo:
+                                score = 100
+                            # Nome do arquivo Excel começa com o nome do XLSX (correspondência muito forte)
+                            elif nome_arquivo_limpo.startswith(nome_xlsx_limpo):
+                                # Score baseado na proporção: quanto maior a parte correspondente, melhor
+                                proporcao = len(nome_xlsx_limpo) / len(nome_arquivo_limpo) if nome_arquivo_limpo else 0
+                                score = 90 + (proporcao * 10)  # Entre 90-100
+                            # Nome do XLSX contém o nome do arquivo Excel (correspondência fraca, mas possível)
+                            elif nome_xlsx_limpo.startswith(nome_arquivo_limpo):
+                                proporcao = len(nome_arquivo_limpo) / len(nome_xlsx_limpo) if nome_xlsx_limpo else 0
+                                score = 70 + (proporcao * 10)  # Entre 70-80
+                            # Nome do config está contido no nome do arquivo (correspondência média)
+                            elif nome_xlsx_limpo in nome_arquivo_limpo:
+                                # Penaliza correspondências muito curtas (ex: "custo" em "custobutzkepagina1")
+                                proporcao = len(nome_xlsx_limpo) / len(nome_arquivo_limpo) if nome_arquivo_limpo else 0
+                                # Se a correspondência é muito curta comparada ao total, reduz o score
+                                if proporcao < 0.3:  # Menos de 30% do nome
+                                    score = 30  # Score baixo para correspondências genéricas
+                                else:
+                                    score = 50 + (proporcao * 20)  # Entre 50-70
+                            
+                            if score > 0:
+                                correspondencias.append((config_file, score, nome_xlsx, tipo))
+            except Exception as e:
+                logging.warning(f"Erro ao ler config {config_file}: {e}")
+                continue
+        
+        # Se encontrou correspondências, retorna a de maior score
+        if correspondencias:
+            # Ordena por score (maior primeiro), depois por tamanho do nome (mais específico primeiro)
+            correspondencias.sort(key=lambda x: (x[1], len(x[2])), reverse=True)
+            melhor_config, melhor_score, melhor_nome, melhor_tipo = correspondencias[0]
+            
+            logging.info(f"Arquivo '{nome_arquivo_excel}' corresponde ao config '{melhor_config.name}' "
+                        f"(arquivo: '{melhor_nome}' tipo: {melhor_tipo}, score: {melhor_score:.1f})")
+            
+            # Se há múltiplas correspondências, avisa
+            if len(correspondencias) > 1:
+                logging.warning(f"Encontradas {len(correspondencias)} correspondências, usando a melhor: {melhor_config.name} (score: {melhor_score:.1f})")
+                for cfg, sc, nm, tp in correspondencias[1:3]:  # Mostra as 2 próximas
+                    logging.debug(f"  Alternativa: {cfg.name} - {nm} ({tp}) - score: {sc:.1f}")
+            
+            return melhor_config
+        
+        # Se não encontrou correspondência, usa o primeiro config (fallback)
+        logging.warning(f"Não encontrou config específico para '{nome_arquivo_excel}', usando '{config_files[0].name}' como fallback")
+        return config_files[0]
     
     def carregar_config(self, config_path):
         """Carrega o arquivo JSON de configuração"""
@@ -52,15 +139,18 @@ class ConversorPlanilhasTXT:
             return int(match.group(2))
         return 1  # Default para primeira linha
     
-    def processar_pagina_com_config(self, arquivo, nome_aba, pagina_config, tipo_arquivo):
+    def processar_pagina_com_config(self, arquivo, nome_aba, pagina_config, tipo_arquivo, config=None):
         """Processa uma página específica usando configuração do config"""
+        if config is None:
+            config = self.config
+        
         start_cell = pagina_config.get('startCell', 'A1')
         start_row = self.parse_cell_to_row(start_cell)  # Linha onde está o cabeçalho (1-based)
         
         # Obtém as colunas do config para este tipo de arquivo
         colunas_config = []
-        if 'files' in self.config and tipo_arquivo in self.config['files']:
-            colunas_config = self.config['files'][tipo_arquivo].get('columns', [])
+        if 'files' in config and tipo_arquivo in config['files']:
+            colunas_config = config['files'][tipo_arquivo].get('columns', [])
         elif 'columns' in pagina_config:
             colunas_config = pagina_config['columns']
         
@@ -116,21 +206,8 @@ class ConversorPlanilhasTXT:
         """Converte todos os arquivos Excel para TXT bruto em formato vertical usando config"""
         logging.info("INICIANDO CONVERSAO: Excel para TXT (formato vertical)")
         
-        # Obtém os arquivos do config
-        arquivos_do_config = []
-        if 'files' in self.config:
-            for tipo_arquivo, info_arquivo in self.config['files'].items():
-                if 'path' in info_arquivo:
-                    caminho_arquivo = self.pasta_origem / info_arquivo['path']
-                    if caminho_arquivo.exists():
-                        arquivos_do_config.append(caminho_arquivo)
-                    else:
-                        logging.warning(f"Arquivo do config não encontrado: {caminho_arquivo}")
-        
-        # Se não houver arquivos no config, busca todos os Excel da pasta (fallback)
-        if not arquivos_do_config:
-            logging.warning("Nenhum arquivo encontrado no config, buscando todos os Excel na pasta")
-            arquivos_do_config = list(self.pasta_origem.glob('*.xlsx')) + list(self.pasta_origem.glob('*.xls'))
+        # Busca todos os arquivos Excel na pasta (agora encontra o config correto para cada um)
+        arquivos_do_config = list(self.pasta_origem.glob('*.xlsx')) + list(self.pasta_origem.glob('*.xls'))
         
         if not arquivos_do_config:
             logging.warning(f"Nenhum arquivo Excel encontrado em {self.pasta_origem}")
@@ -141,20 +218,25 @@ class ConversorPlanilhasTXT:
         for arquivo in arquivos_do_config:
             try:
                 logging.info(f"Processando: {arquivo.name}")
+                
+                # Encontra o config correto para este arquivo Excel
+                config_path = self.encontrar_config_para_arquivo(arquivo.name)
+                config_atual = self.carregar_config(config_path)
+                
                 xls = pd.ExcelFile(arquivo)
                 
-                # Identifica qual tipo de arquivo é este (custo ou venda)
+                # Identifica qual tipo de arquivo é este (custo ou venda) usando o config atual
                 tipo_arquivo_atual = None
-                if 'files' in self.config:
-                    for tipo, info in self.config['files'].items():
+                if 'files' in config_atual:
+                    for tipo, info in config_atual['files'].items():
                         if info.get('path', '').lower() == arquivo.name.lower():
                             tipo_arquivo_atual = tipo
                             break
                 
-                # Verifica se há configuração de páginas no config
+                # Verifica se há configuração de páginas no config atual
                 paginas_config = []
-                if 'pages' in self.config:
-                    for pagina in self.config['pages']:
+                if 'pages' in config_atual:
+                    for pagina in config_atual['pages']:
                         if pagina.get('isApproved', False):
                             paginas_config.append(pagina)
                 
@@ -187,13 +269,14 @@ class ConversorPlanilhasTXT:
                     # Se não houver config de páginas, processa todas as abas
                     paginas_por_aba = {nome_aba: [] for nome_aba in xls.sheet_names}
                 
-                # Processa cada aba
+                    # Processa cada aba
                 for nome_aba, paginas_desta_aba in paginas_por_aba.items():
                     try:
                         # Se há páginas configuradas para esta aba, usa a primeira
                         if paginas_desta_aba and tipo_arquivo_atual:
                             pagina_config = paginas_desta_aba[0]  # Usa a primeira página configurada
-                            df = self.processar_pagina_com_config(arquivo, nome_aba, pagina_config, tipo_arquivo_atual)
+                            # Usa o config atual para processar a página
+                            df = self.processar_pagina_com_config(arquivo, nome_aba, pagina_config, tipo_arquivo_atual, config_atual)
                             logging.info(f"  Processando aba '{nome_aba}' com config (startCell: {pagina_config.get('startCell', 'A1')})")
                         else:
                             # Fallback: processa sem config

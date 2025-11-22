@@ -5,16 +5,19 @@ import re
 
 class GeradorJSONMesclado:
     def __init__(self, config_path=None, pasta_json='./json_final', pasta_destino='./jsons_mesclados'):
-        if config_path is None:
-            config_path = self.encontrar_config()
-        
-        self.config = self.carregar_config(config_path)
+        # Não carrega config aqui, será carregado por grupo de arquivos
+        self.config = None
+        self.config_path = config_path
         self.pasta_json = Path(pasta_json)
         self.pasta_destino = Path(pasta_destino)
         self.pasta_destino.mkdir(exist_ok=True)
         
-    def encontrar_config(self):
-        """Encontra automaticamente o primeiro arquivo JSON na pasta configs"""
+    def normalizar_nome(self, nome):
+        """Normaliza nome para comparação (remove caracteres especiais e converte para minúsculas)"""
+        return re.sub(r'[^a-zA-Z0-9]', '', str(nome).lower().strip())
+    
+    def encontrar_config(self, nome_arquivo_json=None):
+        """Encontra o config apropriado baseado no arquivo JSON sendo processado"""
         config_dir = Path('./configs')
         if not config_dir.exists():
             logging.error("Pasta configs não encontrada")
@@ -25,9 +28,77 @@ class GeradorJSONMesclado:
             logging.error("Nenhum arquivo JSON encontrado em ./configs/")
             exit(1)
         
-        config_path = config_files[0]
-        logging.info(f"Usando configuração: {config_path}")
-        return config_path
+        # Se não foi passado nome de arquivo, retorna o primeiro (comportamento antigo)
+        if nome_arquivo_json is None:
+            config_path = config_files[0]
+            logging.info(f"Usando configuração padrão: {config_path}")
+            return config_path
+        
+        # Remove extensão do arquivo JSON e normaliza
+        nome_arquivo_sem_ext = Path(nome_arquivo_json).stem
+        nome_arquivo_limpo = self.normalizar_nome(nome_arquivo_sem_ext)
+        
+        # Lista para armazenar correspondências encontradas (config, score de correspondência, nome)
+        correspondencias = []
+        
+        for config_file in config_files:
+            try:
+                with open(config_file, 'r', encoding='utf-8') as f:
+                    config_temp = json.load(f)
+                
+                # Verifica se algum arquivo definido no config corresponde ao arquivo JSON
+                if 'files' in config_temp:
+                    for tipo, info in config_temp['files'].items():
+                        if 'path' in info:
+                            nome_xlsx = Path(info['path']).stem
+                            nome_xlsx_limpo = self.normalizar_nome(nome_xlsx)
+                            
+                            # Calcula score de correspondência (quanto maior, melhor)
+                            score = 0
+                            
+                            # Correspondência exata = score máximo
+                            if nome_xlsx_limpo == nome_arquivo_limpo:
+                                score = 100
+                            # Nome do arquivo JSON começa com o nome do XLSX (correspondência muito forte)
+                            elif nome_arquivo_limpo.startswith(nome_xlsx_limpo):
+                                proporcao = len(nome_xlsx_limpo) / len(nome_arquivo_limpo) if nome_arquivo_limpo else 0
+                                score = 90 + (proporcao * 10)  # Entre 90-100
+                            # Nome do XLSX contém o nome do arquivo JSON (correspondência fraca, mas possível)
+                            elif nome_xlsx_limpo.startswith(nome_arquivo_limpo):
+                                proporcao = len(nome_arquivo_limpo) / len(nome_xlsx_limpo) if nome_xlsx_limpo else 0
+                                score = 70 + (proporcao * 10)  # Entre 70-80
+                            # Nome do config está contido no nome do arquivo (correspondência média)
+                            elif nome_xlsx_limpo in nome_arquivo_limpo:
+                                proporcao = len(nome_xlsx_limpo) / len(nome_arquivo_limpo) if nome_arquivo_limpo else 0
+                                if proporcao < 0.3:  # Menos de 30% do nome
+                                    score = 30
+                                else:
+                                    score = 50 + (proporcao * 20)  # Entre 50-70
+                            
+                            if score > 0:
+                                correspondencias.append((config_file, score, nome_xlsx, tipo))
+            except Exception as e:
+                logging.warning(f"Erro ao ler config {config_file}: {e}")
+                continue
+        
+        # Se encontrou correspondências, retorna a de maior score
+        if correspondencias:
+            # Ordena por score (maior primeiro), depois por tamanho do nome (mais específico primeiro)
+            correspondencias.sort(key=lambda x: (x[1], len(x[2])), reverse=True)
+            melhor_config, melhor_score, melhor_nome, melhor_tipo = correspondencias[0]
+            
+            logging.info(f"Arquivo '{nome_arquivo_json}' corresponde ao config '{melhor_config.name}' "
+                        f"(arquivo: '{melhor_nome}' tipo: {melhor_tipo}, score: {melhor_score:.1f})")
+            
+            # Se há múltiplas correspondências, avisa
+            if len(correspondencias) > 1:
+                logging.warning(f"Encontradas {len(correspondencias)} correspondências, usando a melhor: {melhor_config.name} (score: {melhor_score:.1f})")
+            
+            return melhor_config
+        
+        # Se não encontrou correspondência, usa o primeiro config (fallback)
+        logging.warning(f"Não encontrou config específico para '{nome_arquivo_json}', usando '{config_files[0].name}' como fallback")
+        return config_files[0]
         
     def carregar_config(self, config_path):
         config_path = Path(config_path)
@@ -46,16 +117,22 @@ class GeradorJSONMesclado:
         nome_limpo = re.sub(r'[^a-zA-Z0-9]', '', nome_sem_ext.lower())
         return nome_limpo
     
-    def identificar_tipo_arquivo(self, nome_arquivo):
+    def identificar_tipo_arquivo(self, nome_arquivo, config=None):
         """Identifica se o arquivo é de custo ou venda baseado no config"""
-        files_config = self.config.get('files', {})
+        if config is None:
+            config = self.config
+        
+        if config is None:
+            return None
+            
+        files_config = config.get('files', {})
         
         nome_arquivo_limpo = self.normalizar_nome_arquivo(nome_arquivo)
         
-        for tipo, config in files_config.items():
-            if 'path' in config:
+        for tipo, config_file in files_config.items():
+            if 'path' in config_file:
                 # Pega o nome do arquivo XLSX do config e normaliza
-                nome_xlsx = Path(config['path']).stem  # Remove .xlsx
+                nome_xlsx = Path(config_file['path']).stem  # Remove .xlsx
                 nome_xlsx_limpo = self.normalizar_nome_arquivo(nome_xlsx)
                 
                 # Verifica se o arquivo atual corresponde ao esperado (comparação flexível)
@@ -66,8 +143,8 @@ class GeradorJSONMesclado:
         logging.warning(f"Arquivo {nome_arquivo} não corresponde a nenhum config")
         return None
     
-    def normalizar_nome(self, nome):
-        """Normaliza nome para comparação"""
+    def normalizar_nome_produto(self, nome):
+        """Normaliza nome para comparação de produtos"""
         if isinstance(nome, (list, dict)):
             return ""
         return re.sub(r'\s+', ' ', str(nome).lower().strip())
@@ -116,27 +193,47 @@ class GeradorJSONMesclado:
         
         return dados_expandidos
     
-    def carregar_jsons(self):
-        """Carrega todos os JSONs da pasta json_final"""
-        dados_custo = []
-        dados_venda = []
-        
+    def agrupar_arquivos_por_config(self):
+        """Agrupa arquivos JSON por config correspondente"""
         arquivos_json = list(self.pasta_json.glob('*.json'))
         
         if not arquivos_json:
             logging.error(f"Nenhum arquivo JSON encontrado em {self.pasta_json}")
-            return dados_custo, dados_venda
+            return {}
         
         # Log dos arquivos encontrados
         logging.info(f"Arquivos JSON encontrados: {[f.name for f in arquivos_json]}")
         
+        # Agrupa arquivos por config
+        grupos_por_config = {}
+        
         for arquivo in arquivos_json:
+            # Encontra o config apropriado para este arquivo
+            config_path = self.encontrar_config(arquivo.name)
+            config_key = str(config_path)
+            
+            if config_key not in grupos_por_config:
+                grupos_por_config[config_key] = {
+                    'config_path': config_path,
+                    'arquivos': []
+                }
+            
+            grupos_por_config[config_key]['arquivos'].append(arquivo)
+        
+        return grupos_por_config
+    
+    def carregar_jsons_do_grupo(self, arquivos, config):
+        """Carrega JSONs de um grupo específico (mesma config)"""
+        dados_custo = []
+        dados_venda = []
+        
+        for arquivo in arquivos:
             try:
                 with open(arquivo, 'r', encoding='utf-8') as f:
                     dados = json.load(f)
                 
                 # Identifica o tipo do arquivo baseado no config
-                tipo = self.identificar_tipo_arquivo(arquivo.name)
+                tipo = self.identificar_tipo_arquivo(arquivo.name, config)
                 
                 if tipo == 'custo':
                     # Expande as variações de cores
@@ -157,6 +254,13 @@ class GeradorJSONMesclado:
         
         return dados_custo, dados_venda
     
+    def obter_nome_arquivo_venda(self, config):
+        """Obtém o nome do arquivo de venda do config para usar como nome do arquivo final"""
+        if 'files' in config and 'venda' in config['files']:
+            nome_venda = Path(config['files']['venda'].get('path', 'venda')).stem
+            return nome_venda
+        return 'produtos_mesclados'
+    
     def mesclar_dados(self, dados_custo, dados_venda):
         """Mescla dados de custo e venda baseado no mergeConfig com suporte real a additionalKeys"""
 
@@ -170,15 +274,15 @@ class GeradorJSONMesclado:
             partes = []
 
             # DESCRICAO (sempre)
-            partes.append(self.normalizar_nome(produto.get('DESCRICAO', '')))
+            partes.append(self.normalizar_nome_produto(produto.get('DESCRICAO', '')))
 
             # COR (opcional)
             if include_variation:
-                partes.append(self.normalizar_nome(produto.get('COR', '')))
+                partes.append(self.normalizar_nome_produto(produto.get('COR', '')))
 
             # additionalKeys (dinâmico)
             for key in additional_keys:
-                partes.append(self.normalizar_nome(produto.get(key, '')))
+                partes.append(self.normalizar_nome_produto(produto.get(key, '')))
 
             return "|".join(partes)
 
@@ -218,7 +322,7 @@ class GeradorJSONMesclado:
         
         for produto in produtos:
             descricao = produto.get('DESCRICAO', '')
-            descricao_normalizada = self.normalizar_nome(descricao)
+            descricao_normalizada = self.normalizar_nome_produto(descricao)
             
             if descricao_normalizada not in codigos_gerados:
                 codigos_gerados[descricao_normalizada] = f"{codigo_sequencial:06d}"
@@ -249,14 +353,23 @@ class GeradorJSONMesclado:
             dados_limpos.append(produto_limpo)
         return dados_limpos
     
-    def gerar_json_final(self):
-        logging.info("INICIANDO GERACAO JSON MESCLADO")
+    def processar_grupo(self, grupo):
+        """Processa um grupo de arquivos com a mesma config"""
+        config_path = grupo['config_path']
+        arquivos = grupo['arquivos']
         
-        # Carrega os JSONs
-        dados_custo, dados_venda = self.carregar_jsons()
+        # Carrega o config para este grupo
+        config = self.carregar_config(config_path)
+        self.config = config  # Atualiza o config da instância
+        
+        logging.info(f"\n=== Processando grupo com config: {config_path.name} ===")
+        logging.info(f"Arquivos neste grupo: {[f.name for f in arquivos]}")
+        
+        # Carrega os JSONs deste grupo
+        dados_custo, dados_venda = self.carregar_jsons_do_grupo(arquivos, config)
         
         if not dados_custo and not dados_venda:
-            logging.error("Nenhum dado encontrado para processar")
+            logging.warning(f"Nenhum dado encontrado para processar no grupo {config_path.name}")
             return 0
         
         logging.info(f"Dados carregados - Custo: {len(dados_custo)} registros, Venda: {len(dados_venda)} registros")
@@ -275,8 +388,12 @@ class GeradorJSONMesclado:
         # Limpa dados
         produtos_finais = self.limpar_dados(produtos_finais)
         
+        # Obtém nome do arquivo baseado no arquivo de venda do config
+        nome_arquivo_venda = self.obter_nome_arquivo_venda(config)
+        nome_arquivo_final = f"{nome_arquivo_venda}_mesclado.json"
+        
         # Salva JSON final
-        caminho_json = self.pasta_destino / 'produtos_mesclados.json'
+        caminho_json = self.pasta_destino / nome_arquivo_final
         with open(caminho_json, 'w', encoding='utf-8') as f:
             json.dump(produtos_finais, f, ensure_ascii=False, indent=2)
         
@@ -287,6 +404,33 @@ class GeradorJSONMesclado:
         logging.info(f"RESUMO: {codigos_unicos} produtos únicos com {len(produtos_finais)} variações totais")
         
         return len(produtos_finais)
+    
+    def gerar_json_final(self):
+        logging.info("INICIANDO GERACAO JSON MESCLADO")
+        
+        # Agrupa arquivos por config
+        grupos_por_config = self.agrupar_arquivos_por_config()
+        
+        if not grupos_por_config:
+            logging.error("Nenhum arquivo encontrado para processar")
+            return 0
+        
+        logging.info(f"Encontrados {len(grupos_por_config)} grupo(s) de arquivos por config")
+        
+        total_processados = 0
+        total_produtos = 0
+        
+        # Processa cada grupo separadamente
+        for config_key, grupo in grupos_por_config.items():
+            produtos = self.processar_grupo(grupo)
+            total_produtos += produtos
+            total_processados += 1
+        
+        logging.info(f"\n=== CONCLUIDO ===")
+        logging.info(f"Total de grupos processados: {total_processados}")
+        logging.info(f"Total de produtos gerados: {total_produtos}")
+        
+        return total_produtos
 
 def main():
     logging.basicConfig(level=logging.INFO, format='%(asctime)s [%(levelname)s] %(message)s')
