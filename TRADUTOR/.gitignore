@@ -1,13 +1,12 @@
 # Ignorar pastas específicas
-jsons/
-saidas/
+jsons/*
+!jsons/.gitkeep
+
+saidas/*
+!saidas/.gitkeep
 
 # Arquivos temporários do Python
 __pycache__/
 *.pyc
 *.pyo
 *.pyd
-
-# Ambiente virtual
-venv/
-.env/
