@@ -1,0 +1,13 @@
+# Ignorar pastas específicas
+jsons/
+saidas/
+
+# Arquivos temporários do Python
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+
+# Ambiente virtual
+venv/
+.env/

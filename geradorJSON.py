@@ -73,10 +73,11 @@ class GeradorJSON:
                 })
         
         return variacoes
-    
+        
     def processar_arquivo_txt(self, arquivo_txt):
         registros = []
-        
+        nomes_usados = {}
+
         with open(arquivo_txt, 'r', encoding='utf-8') as f:
             conteudo = f.read()
         
@@ -86,48 +87,58 @@ class GeradorJSON:
             linhas = bloco.split('\n')
             registro = {}
             
-            # Primeiro processa as variações de cores
+            # variações de cores
             variacoes_cores = self.extrair_variacoes_cores(linhas)
             
             for mapeamento in self.config['columnMapping']:
                 coluna_gabarito = mapeamento['gabaritoColumn']
                 coluna_origem = mapeamento['sourceColumn']
-                
+
+                # campos manuais
                 if coluna_origem == "__EMPTY__":
                     if 'name' in mapeamento:
-                        if mapeamento['name'] == "VAZIO":
-                            # Não adiciona campos vazios
+                        if mapeamento['name'] in ["VAZIO", "MERGE"]:
                             continue
-                        elif mapeamento['name'] == "MERGE":
-                            # Remove MERGE, não adiciona
-                            continue
-                        else:
-                            # Adiciona apenas se tiver valor
-                            registro[coluna_gabarito] = mapeamento['name']
+                        registro[coluna_gabarito] = mapeamento['name']
                     continue
-                
+
+                # coluna COR (lista)
                 if isinstance(coluna_origem, list):
-                    # Para coluna COR, usa as variações extraídas
                     if coluna_gabarito == "COR":
-                        if variacoes_cores:  # Só adiciona se tiver variações
+                        if variacoes_cores:
                             registro[coluna_gabarito] = variacoes_cores
                     else:
                         for coluna in coluna_origem:
                             valor = self.encontrar_valor_registro(linhas, coluna)
-                            if valor and valor != "0" and valor != "":
+                            if valor and valor not in ["0", "", "MERGE"]:
                                 registro[coluna_gabarito] = valor
                                 break
-                else:
-                    valor = self.encontrar_valor_registro(linhas, coluna_origem)
-                    # Só adiciona se tiver valor e não for MERGE
-                    if valor and valor != "" and valor != "MERGE":
-                        registro[coluna_gabarito] = valor
+                    continue
+
+                # coluna única
+                valor = self.encontrar_valor_registro(linhas, coluna_origem)
+                if valor and valor not in ["", "MERGE"]:
+                    registro[coluna_gabarito] = valor
             
-            # Só adiciona o registro se tiver pelo menos algum dado
-            if registro:
-                registros.append(registro)
-        
+            # GARANTIR QUE SEMPRE HAJA UM REGISTRO
+            if "DESCRICAO" not in registro:
+                registro["DESCRICAO"] = "SEM NOME"
+
+            # REMOVER ESPAÇOS INDESEJADOS
+            nome_original = registro["DESCRICAO"].strip()
+            nome_base = re.sub(r'\s+', ' ', nome_original)
+
+            # NUMERAR DUPLICADOS
+            if nome_base not in nomes_usados:
+                nomes_usados[nome_base] = 0
+            else:
+                nomes_usados[nome_base] += 1
+                registro["DESCRICAO"] = f"{nome_base} ({nomes_usados[nome_base]})"
+
+            registros.append(registro)
+
         return registros
+
     
     def gerar_json_final(self):
         logging.info("INICIANDO GERACAO JSON")
