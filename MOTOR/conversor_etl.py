@@ -18,7 +18,14 @@ class ConversorPlanilhasTXT:
     
     def normalizar_nome(self, nome):
         return re.sub(r'[^a-zA-Z0-9]', '', str(nome).lower().strip())
-    
+
+    def normalizar_coluna(self, nome):
+        if nome is None:
+            return ""
+        nome = str(nome).replace('\n', ' ').strip()
+        nome = re.sub(r'\s+', ' ', nome)
+        return nome
+
     def encontrar_config(self):
         config_dir = Path('./configs')
         if not config_dir.exists():
@@ -140,7 +147,7 @@ class ConversorPlanilhasTXT:
         else:
             skip_rows = start_row - 1 if start_row > 1 else 0
             df = pd.read_excel(arquivo, sheet_name=nome_aba, header=0, skiprows=skip_rows)
-            df.columns = df.columns.str.replace('\n', ' ').str.strip()
+            df.columns = [self.normalizar_coluna(c) for c in df.columns]
         
         df = df.dropna(how='all')
         df = df.dropna(axis=1, how='all')
@@ -219,9 +226,11 @@ class ConversorPlanilhasTXT:
                                 f.write(f"========== REGISTRO {idx + 1} ==========\n")
                                 for col in df.columns:
                                     valor = row[col]
-                                    valor_str = "" if pd.isna(valor) else str(valor)
-                                    f.write(f"{col}: {valor_str}\n")
-                                f.write("\n")
+                                
+                                    col_str = self.normalizar_coluna(col)
+                                    valor_str = "" if pd.isna(valor) else self.normalizar_coluna(valor)
+
+                                    f.write(f"{col_str}: {valor_str}\n")
                         
                         total_txt += 1
                         logging.info(f"Gerado: {nome_txt} ({len(df)} registros)")

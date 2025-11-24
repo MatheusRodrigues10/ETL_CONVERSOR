@@ -12,7 +12,6 @@ class GeradorJSON:
         self.pasta_destino.mkdir(exist_ok=True)
         
     def encontrar_config(self, nome_arquivo_txt=None):
-        """Encontra o config apropriado baseado no arquivo TXT sendo processado"""
         config_dir = Path('./configs')
         if not config_dir.exists():
             logging.error("Pasta configs não encontrada")
@@ -82,6 +81,13 @@ class GeradorJSON:
     def normalizar_nome(self, nome):
         return re.sub(r'[^a-zA-Z0-9]', '', nome.lower().strip())
     
+    def normalizar_coluna(self, nome):
+        if nome is None:
+            return ""
+        nome = str(nome).replace('\n', ' ').strip()
+        nome = re.sub(r'\s+', ' ', nome)
+        return nome
+
     def comparar_nomes(self, nome1, nome2):
         return self.normalizar_nome(nome1) == self.normalizar_nome(nome2)
     
@@ -118,7 +124,8 @@ class GeradorJSON:
         for linha in linhas:
             if ':' in linha:
                 coluna, valor = linha.split(':', 1)
-                if self.comparar_nomes(coluna.strip(), coluna_procurada):
+                coluna_limpa = self.normalizar_coluna(coluna)
+                if self.comparar_nomes(coluna_limpa, coluna_procurada):
                     return valor.strip()
         return ""
     
@@ -159,7 +166,7 @@ class GeradorJSON:
         for coluna_cor in colunas_cores:
             valor = self.encontrar_valor_registro(linhas, coluna_cor)
             if valor and valor != "0" and valor != "":
-                cor_limpa = coluna_cor.replace('\n', ' ').strip()
+                cor_limpa = self.normalizar_coluna(coluna_cor)
                 variacoes.append({
                     "nome_cor": cor_limpa,
                     "preco": valor
