@@ -134,6 +134,9 @@ export const ALL_COLUMNS = [
 // Coluna de variação (COR é usada para variações de produtos)
 export const VARIATION_COLUMN = 'COR';
 
+// Colunas que sempre devem aparecer no JSON como MERGE (não são mapeadas pelo usuário)
+export const MERGE_COLUMNS = ['CUSTO', 'PRECO1'] as const;
+
 // Valores padrão do gabarito
 export const DEFAULT_VALUES = {
   COD_PRODUTO: 'VAZIO',

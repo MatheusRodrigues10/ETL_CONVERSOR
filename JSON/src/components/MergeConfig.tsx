@@ -1,38 +1,56 @@
+import { useMemo } from 'react';
 import { Card } from '@/components/ui/card';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Label } from '@/components/ui/label';
-import { Switch } from '@/components/ui/switch';
-import { MergeConfig as MergeConfigType, UploadedFile } from '@/types/spreadsheet';
+import { MergeConfig as MergeConfigType, UploadedFile, ColumnMapping } from '@/types/spreadsheet';
 import { GitMerge } from 'lucide-react';
-import { Input } from '@/components/ui/input';
-import { Button } from '@/components/ui/button';
 
 interface MergeConfigProps {
   custoFile: UploadedFile | null;
   vendaFile: UploadedFile | null;
   config: MergeConfigType | null;
   onConfigChange: (config: MergeConfigType) => void;
+  columnMappings: ColumnMapping[]; // Mapeamentos de colunas do gabarito
 }
 
-export const MergeConfig = ({ custoFile, vendaFile, config, onConfigChange }: MergeConfigProps) => {
+export const MergeConfig = ({ custoFile, vendaFile, config, onConfigChange, columnMappings }: MergeConfigProps) => {
+  // Obter colunas do gabarito que foram mapeadas e que têm dados (não estão vazias)
+  const mappedGabaritoColumns = useMemo(() => {
+    const columns = new Set<string>();
+    columnMappings.forEach((mapping) => {
+      // Verificar se a coluna tem dados (não é __EMPTY__)
+      let hasData = false;
+      
+      if (mapping.sourceColumn === "__EMPTY__" || mapping.sourceColumn === null || mapping.sourceColumn === undefined) {
+        hasData = false;
+      } else if (Array.isArray(mapping.sourceColumn)) {
+        // Se for array, verificar se tem pelo menos um elemento não vazio
+        hasData = mapping.sourceColumn.length > 0 && 
+                  mapping.sourceColumn.some(col => col && col.trim() !== "" && col !== "__EMPTY__");
+      } else {
+        // Se for string, verificar se não está vazia
+        hasData = String(mapping.sourceColumn).trim() !== "" && mapping.sourceColumn !== "__EMPTY__";
+      }
+      
+      if (hasData) {
+        columns.add(mapping.gabaritoColumn);
+      }
+    });
+    return Array.from(columns).sort();
+  }, [columnMappings]);
+
   const updateConfig = (updates: Partial<MergeConfigType>) => {
     onConfigChange({
       leftFile: config?.leftFile || 'custo',
       rightFile: config?.rightFile || 'venda',
       leftKey: config?.leftKey || '',
       rightKey: config?.rightKey || '',
-      how: config?.how || 'inner',
-      includeVariationKey: config?.includeVariationKey || false,
+      how: 'inner', // Sempre inner join
+      includeVariationKey: true, // Sempre ativado
       ...updates,
+      how: 'inner', // Garantir que sempre seja inner
+      includeVariationKey: true, // Garantir que sempre seja true
     });
-  };
-
-  const isCustomKey = (key: string, file: 'left' | 'right'): boolean => {
-    if (!key || key === '') return false;
-    const targetFile = file === 'left' 
-      ? (config?.leftFile === 'custo' ? custoFile : vendaFile)
-      : (config?.rightFile === 'custo' ? custoFile : vendaFile);
-    return targetFile ? !targetFile.columns.includes(key) : false;
   };
 
   if (!custoFile || !vendaFile) {
@@ -70,48 +88,18 @@ export const MergeConfig = ({ custoFile, vendaFile, config, onConfigChange }: Me
               <Select
                 value={config?.leftKey || ''}
                 onValueChange={(value) => updateConfig({ leftKey: value })}
-                disabled={isCustomKey(config?.leftKey || '', 'left')}
               >
                 <SelectTrigger>
-                  <SelectValue placeholder="Selecione a coluna..." />
+                  <SelectValue placeholder="Selecione a coluna do gabarito..." />
                 </SelectTrigger>
                 <SelectContent>
-                  {(config?.leftFile === 'custo' ? custoFile : vendaFile)?.columns.map((col) => (
+                  {mappedGabaritoColumns.map((col) => (
                     <SelectItem key={col} value={col}>
                       {col}
                     </SelectItem>
                   ))}
                 </SelectContent>
               </Select>
-              <div className="mt-2 flex gap-2">
-                <Input
-                  placeholder="Ou digite a coluna..."
-                  defaultValue={config?.leftKey || ''}
-                  onKeyDown={(e) => {
-                    const target = e.target as HTMLInputElement;
-                    if (e.key === 'Enter' && target.value.trim()) {
-                      updateConfig({ leftKey: target.value.trim() });
-                    }
-                  }}
-                />
-                <Button
-                  type="button"
-                  variant="outline"
-                  onClick={(e) => {
-                    const input = (e.currentTarget.previousElementSibling as HTMLInputElement);
-                    if (input && input.value.trim()) {
-                      updateConfig({ leftKey: input.value.trim() });
-                    }
-                  }}
-                >Usar</Button>
-                {isCustomKey(config?.leftKey || '', 'left') && (
-                  <Button
-                    type="button"
-                    variant="outline"
-                    onClick={() => updateConfig({ leftKey: '' })}
-                  >Limpar</Button>
-                )}
-              </div>
             </div>
           </div>
 
@@ -137,79 +125,40 @@ export const MergeConfig = ({ custoFile, vendaFile, config, onConfigChange }: Me
               <Select
                 value={config?.rightKey || ''}
                 onValueChange={(value) => updateConfig({ rightKey: value })}
-                disabled={isCustomKey(config?.rightKey || '', 'right')}
               >
                 <SelectTrigger>
-                  <SelectValue placeholder="Selecione a coluna..." />
+                  <SelectValue placeholder="Selecione a coluna do gabarito..." />
                 </SelectTrigger>
                 <SelectContent>
-                  {(config?.rightFile === 'custo' ? custoFile : vendaFile)?.columns.map((col) => (
+                  {mappedGabaritoColumns.map((col) => (
                     <SelectItem key={col} value={col}>
                       {col}
                     </SelectItem>
                   ))}
                 </SelectContent>
               </Select>
-              <div className="mt-2 flex gap-2">
-                <Input
-                  placeholder="Ou digite a coluna..."
-                  defaultValue={config?.rightKey || ''}
-                  onKeyDown={(e) => {
-                    const target = e.target as HTMLInputElement;
-                    if (e.key === 'Enter' && target.value.trim()) {
-                      updateConfig({ rightKey: target.value.trim() });
-                    }
-                  }}
-                />
-                <Button
-                  type="button"
-                  variant="outline"
-                  onClick={(e) => {
-                    const input = (e.currentTarget.previousElementSibling as HTMLInputElement);
-                    if (input && input.value.trim()) {
-                      updateConfig({ rightKey: input.value.trim() });
-                    }
-                  }}
-                >Usar</Button>
-                {isCustomKey(config?.rightKey || '', 'right') && (
-                  <Button
-                    type="button"
-                    variant="outline"
-                    onClick={() => updateConfig({ rightKey: '' })}
-                  >Limpar</Button>
-                )}
-              </div>
             </div>
           </div>
         </div>
 
-        <div>
-          <Label className="text-sm font-medium mb-2">Tipo de Merge</Label>
-          <Select
-            value={config?.how || 'inner'}
-            onValueChange={(value: 'left' | 'right' | 'inner' | 'outer') => updateConfig({ how: value })}
-          >
-            <SelectTrigger>
-              <SelectValue />
-            </SelectTrigger>
-            <SelectContent>
-              <SelectItem value="inner">Inner Join (apenas correspondências)</SelectItem>
-              <SelectItem value="left">Left Join (todos do arquivo base)</SelectItem>
-              <SelectItem value="right">Right Join (todos do arquivo secundário)</SelectItem>
-              <SelectItem value="outer">Outer Join (todos os registros)</SelectItem>
-            </SelectContent>
-          </Select>
+        <div className="p-3 bg-muted/30 rounded-lg border border-border">
+          <div className="flex items-center gap-2">
+            <Label className="text-sm font-medium">Tipo de Merge:</Label>
+            <span className="text-sm text-muted-foreground">Inner Join (apenas correspondências)</span>
+          </div>
+          <p className="text-xs text-muted-foreground mt-1">
+            O merge sempre será realizado como Inner Join para incluir apenas registros que correspondem em ambas as planilhas.
+          </p>
         </div>
 
-        <div className="flex items-center justify-between border rounded-md p-3">
-          <div>
-            <Label className="text-sm font-medium">Incluir variação (COR) no join</Label>
-            <div className="text-xs text-muted-foreground">Quando habilitado, a coluna de variação será usada junto com a chave para o merge.</div>
+        <div className="p-3 bg-muted/30 rounded-lg border border-border">
+          <div className="flex items-center gap-2">
+            <Label className="text-sm font-medium">Incluir variação (COR) no join:</Label>
+            <span className="text-sm text-muted-foreground">Sempre ativado</span>
           </div>
-          <Switch
-            checked={Boolean(config?.includeVariationKey)}
-            onCheckedChange={(checked) => updateConfig({ includeVariationKey: Boolean(checked) })}
-          />
+          <p className="text-xs text-muted-foreground mt-1">
+            A coluna de variação (COR) será sempre usada junto com a chave para o merge.
+          </p>
         </div>
       </div>
     </Card>

@@ -1,14 +1,10 @@
 import { useCallback, useState } from 'react';
-import { Upload, FileSpreadsheet, X, Loader2, Search, Layers } from 'lucide-react';
+import { Upload, FileSpreadsheet, X, Loader2, Pencil } from 'lucide-react';
 import { Card } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
-import { Input } from '@/components/ui/input';
-import { Label } from '@/components/ui/label';
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
-import { Switch } from '@/components/ui/switch';
 import { useToast } from '@/hooks/use-toast';
 import * as XLSX from 'xlsx';
-import { UploadedFile, CellData, PageConfig } from '@/types/spreadsheet';
+import { UploadedFile, PageConfig } from '@/types/spreadsheet';
 import { PageManager } from './PageManager';
 
 interface FileUploadProps {
@@ -17,17 +13,26 @@ interface FileUploadProps {
   onFileUpload: (file: UploadedFile) => void;
   onFileRemove: () => void;
   onPagesConfigChange?: (pages: any[]) => void; // Configurações de páginas
+  initialPagesConfig?: PageConfig[]; // Configurações iniciais de páginas
 }
 
-export const FileUpload = ({ type, file, onFileUpload, onFileRemove, onPagesConfigChange }: FileUploadProps) => {
+export const FileUpload = ({ type, file, onFileUpload, onFileRemove, onPagesConfigChange, initialPagesConfig = [] }: FileUploadProps) => {
   const { toast } = useToast();
   const [isLoading, setIsLoading] = useState(false);
   const [workbook, setWorkbook] = useState<XLSX.WorkBook | null>(null);
-  const [selectedSheetIndex, setSelectedSheetIndex] = useState<number | null>(null);
-  const [startCell, setStartCell] = useState<string>('A1');
   const [isConfiguring, setIsConfiguring] = useState(false);
   const [fileName, setFileName] = useState<string>('');
-  const [useMultiPageMode, setUseMultiPageMode] = useState(false);
+  
+  // Manter workbook mesmo após gerar arquivo para permitir edição posterior
+  const handleFileReady = (uploadedFile: UploadedFile) => {
+    onFileUpload(uploadedFile);
+    setIsConfiguring(false);
+    // Não limpar workbook aqui para permitir edição posterior
+  };
+  
+  const handleEditConfig = () => {
+    setIsConfiguring(true);
+  };
 
   const handleFileChange = useCallback(
     (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -167,11 +172,8 @@ export const FileUpload = ({ type, file, onFileUpload, onFileRemove, onPagesConf
           // Salvar workbook e mostrar interface de configuração
           setWorkbook(loadedWorkbook);
           setFileName(selectedFile.name);
-          setSelectedSheetIndex(0);
-          setStartCell('A1');
           setIsConfiguring(true);
           setIsLoading(false);
-          setUseMultiPageMode(false); // Resetar modo multi-página
           
           toast({
             title: 'Arquivo carregado',
@@ -218,255 +220,7 @@ export const FileUpload = ({ type, file, onFileUpload, onFileRemove, onPagesConf
     [type, toast]
   );
 
-  // Função para processar dados a partir da célula inicial
-  const processDataFromCell = useCallback(() => {
-    if (!workbook || selectedSheetIndex === null) {
-      toast({
-        title: 'Erro',
-        description: 'Selecione uma aba primeiro',
-        variant: 'destructive',
-      });
-      return;
-    }
 
-    try {
-      const sheetName = workbook.SheetNames[selectedSheetIndex];
-      const sheet = workbook.Sheets[sheetName];
-      
-      if (!sheet['!ref']) {
-        toast({
-          title: 'Erro',
-          description: 'A aba selecionada está vazia',
-          variant: 'destructive',
-        });
-        return;
-      }
-
-      // Converter célula inicial (ex: "A5") para índices
-      // O usuário digita em formato Excel (1-based), mas decode_cell retorna (0-based)
-      // Adicionamos +1 para compensar: se digitar A5, queremos ler linha 5 (índice 4), mas ajustamos para índice 5
-      let startCellAddress;
-      try {
-        startCellAddress = XLSX.utils.decode_cell(startCell);
-      } catch (error) {
-        toast({
-          title: 'Erro',
-          description: 'Célula inicial inválida. Use formato como A5, B10, etc.',
-          variant: 'destructive',
-        });
-        return;
-      }
-      
-      // Adicionar +1 para compensar: A5 (linha 5 no Excel) = índice 4, mas queremos ler do índice 4
-      // Na verdade, se o usuário digita A5, ele espera que leia A5, então precisamos manter o índice correto
-      // Mas como o usuário disse que precisa digitar A6 para ler A5, vamos adicionar +1
-      const startRow = startCellAddress.r + 1; // Adicionar 1 para compensar
-      const startCol = startCellAddress.c;
-
-      const range = sheet['!ref'];
-      const decodedRange = XLSX.utils.decode_range(range);
-      const maxRow = decodedRange.e.r;
-      const maxCol = decodedRange.e.c;
-
-      // Função para obter valor de célula considerando merges
-      const getCellValue = (rowIdx: number, colIdx: number): any => {
-        // Verificar merges primeiro
-        const merges = sheet['!merges'] || [];
-        for (const merge of merges) {
-          const { s, e } = merge;
-          if (rowIdx >= s.r && rowIdx <= e.r && colIdx >= s.c && colIdx <= e.c) {
-            // Se está dentro do merge, pegar valor da célula inicial
-            const startAddr = XLSX.utils.encode_cell({ r: s.r, c: s.c });
-            const startCell = sheet[startAddr];
-            if (startCell) {
-              // Priorizar valor formatado, depois valor bruto
-              if (startCell.w !== undefined) {
-                return startCell.w;
-              }
-              if (startCell.v !== undefined && startCell.v !== null) {
-                return String(startCell.v);
-              }
-            }
-            // Se merge não tem valor, retornar vazio apenas se não for célula inicial
-            if (rowIdx !== s.r || colIdx !== s.c) {
-              return '';
-            }
-          }
-        }
-        
-        // Célula normal (não está em merge)
-        const cellAddress = XLSX.utils.encode_cell({ r: rowIdx, c: colIdx });
-        const cell = sheet[cellAddress];
-        
-        if (cell) {
-          // Priorizar valor formatado
-          if (cell.w !== undefined && cell.w !== null) {
-            return String(cell.w);
-          }
-          // Depois valor bruto
-          if (cell.v !== undefined && cell.v !== null) {
-            return String(cell.v);
-          }
-        }
-        return '';
-      };
-
-      // Ler cabeçalho - buscar na linha antes da célula inicial
-      // Se não encontrar valores, buscar algumas linhas acima
-      let headerRow: any[] = [];
-      let headerRowIndex = startRow - 1;
-      let foundHeader = false;
-      
-      // Tentar encontrar cabeçalho (até 5 linhas acima)
-      for (let tryRow = startRow - 1; tryRow >= Math.max(0, startRow - 5); tryRow--) {
-        const candidateRow: any[] = [];
-        let hasValues = false;
-        
-        for (let c = 0; c <= maxCol; c++) {
-          const value = getCellValue(tryRow, c);
-          candidateRow.push(value);
-          if (String(value || '').trim() !== '') {
-            hasValues = true;
-          }
-        }
-        
-        // Se encontrou valores nesta linha e parece com cabeçalho (mais texto que números)
-        if (hasValues) {
-          const textCount = candidateRow.filter(v => {
-            const str = String(v || '').trim();
-            return str !== '' && (isNaN(Number(str)) || str.length > 10);
-          }).length;
-          
-          // Se mais da metade é texto, provavelmente é o cabeçalho
-          if (textCount > candidateRow.length / 2 || tryRow === startRow - 1) {
-            headerRow = candidateRow;
-            headerRowIndex = tryRow;
-            foundHeader = true;
-            break;
-          }
-        }
-      }
-      
-      // Se não encontrou cabeçalho, usar a linha imediatamente anterior
-      if (!foundHeader && startRow > 0) {
-        for (let c = 0; c <= maxCol; c++) {
-          headerRow.push(getCellValue(startRow - 1, c));
-        }
-        headerRowIndex = startRow - 1;
-      }
-
-      // Processar dados a partir da célula inicial
-      const allData: any[][] = [];
-      const cellDataArray: CellData[][] = [];
-      const headerValues = headerRow.map(v => String(v || '').trim().toLowerCase());
-      
-      console.log('Cabeçalho encontrado:', headerRow);
-      console.log('Linha do cabeçalho:', headerRowIndex + 1);
-
-      for (let r = startRow; r <= maxRow; r++) {
-        const row: any[] = [];
-        const cellRow: CellData[] = [];
-        let isEmptyRow = true;
-
-        for (let c = 0; c <= maxCol; c++) {
-          const value = getCellValue(r, c);
-          const strValue = String(value || '').trim();
-          
-          if (strValue !== '') {
-            isEmptyRow = false;
-          }
-
-          row.push(value);
-          cellRow.push({
-            value,
-            page: selectedSheetIndex + 1,
-            pageName: sheetName,
-            row: r + 1, // Excel usa 1-based
-            col: c + 1,
-            cellAddress: XLSX.utils.encode_cell({ r, c }),
-          });
-        }
-
-        // Ignorar linha se estiver vazia
-        if (isEmptyRow) {
-          continue;
-        }
-
-        // Ignorar se for cabeçalho duplicado (todos os valores coincidem com o cabeçalho)
-        const isDuplicateHeader = row.every((cell, idx) => {
-          const cellStr = String(cell || '').trim().toLowerCase();
-          if (cellStr === '') return true; // Células vazias não contam
-          return idx < headerValues.length && headerValues[idx] === cellStr;
-        }) && row.some(cell => String(cell || '').trim() !== '');
-
-        if (!isDuplicateHeader) {
-          allData.push(row);
-          cellDataArray.push(cellRow);
-        }
-      }
-
-      // Criar nomes de colunas - garantir que tenham nomes válidos
-      const columns = headerRow.map((col, idx) => {
-        const colStr = String(col || '').trim();
-        // Se estiver vazio, tentar buscar valor formatado da célula
-        if (colStr === '' && headerRowIndex >= 0) {
-          const cellAddr = XLSX.utils.encode_cell({ r: headerRowIndex, c: idx });
-          const cell = sheet[cellAddr];
-          if (cell) {
-            const formatted = cell.w || (cell.v !== undefined && cell.v !== null ? String(cell.v) : '');
-            if (formatted.trim() !== '') {
-              return formatted.trim();
-            }
-          }
-        }
-        return colStr !== '' ? colStr : `Coluna_${idx + 1}`;
-      });
-      
-      console.log('Colunas finais:', columns);
-
-      if (allData.length === 0) {
-        toast({
-          title: 'Aviso',
-          description: 'Nenhum dado encontrado a partir da célula especificada',
-          variant: 'destructive',
-        });
-        return;
-      }
-
-      const uploadedFile: UploadedFile = {
-        name: fileName || 'arquivo.xlsx',
-        columns,
-        data: allData,
-        type,
-        sheets: workbook.SheetNames,
-        cellData: cellDataArray,
-      };
-
-      onFileUpload(uploadedFile);
-      setIsConfiguring(false);
-      setWorkbook(null);
-
-      toast({
-        title: 'Sucesso!',
-        description: `Dados processados: ${allData.length} linhas de dados a partir de ${startCell} na página ${selectedSheetIndex + 1}`,
-      });
-    } catch (error) {
-      console.error('Error processing data:', error);
-      toast({
-        title: 'Erro',
-        description: 'Erro ao processar dados. Verifique se a célula inicial está correta (ex: A5)',
-        variant: 'destructive',
-      });
-    }
-  }, [workbook, selectedSheetIndex, startCell, fileName, type, onFileUpload, toast]);
-
-  const handleCancel = () => {
-    setWorkbook(null);
-    setIsConfiguring(false);
-    setSelectedSheetIndex(null);
-    setStartCell('A1');
-    setFileName('');
-  };
 
   const getTypeLabel = () => {
     switch (type) {
@@ -502,7 +256,11 @@ export const FileUpload = ({ type, file, onFileUpload, onFileRemove, onPagesConf
             <Button
               variant="ghost"
               size="sm"
-              onClick={onFileRemove}
+              onClick={() => {
+                onFileRemove();
+                setWorkbook(null);
+                setIsConfiguring(false);
+              }}
               className="h-8 w-8 p-0"
             >
               <X className="h-4 w-4" />
@@ -511,91 +269,18 @@ export const FileUpload = ({ type, file, onFileUpload, onFileRemove, onPagesConf
         </div>
 
         {isConfiguring && workbook ? (
-          <>
-            {/* Modo multi-página */}
-            <div className="flex items-center justify-between p-3 bg-muted/30 rounded-lg border border-border">
-              <div className="flex items-center gap-3">
-                <Layers className="h-5 w-5 text-primary" />
-                <div>
-                  <Label htmlFor="multi-page-mode" className="cursor-pointer">
-                    Modo Multi-Página
-                  </Label>
-                  <p className="text-xs text-muted-foreground">
-                    Configure múltiplas páginas dinamicamente
-                  </p>
-                </div>
-              </div>
-              <Switch
-                id="multi-page-mode"
-                checked={useMultiPageMode}
-                onCheckedChange={setUseMultiPageMode}
-              />
-            </div>
-
-            {useMultiPageMode ? (
-              <PageManager
-                workbook={workbook}
-                fileName={fileName}
-                type={type}
-                onPagesConfigChange={(pages: PageConfig[]) => {
-                  if (onPagesConfigChange) {
-                    onPagesConfigChange(pages);
-                  }
-                }}
-                onFileReady={(uploadedFile) => {
-                  onFileUpload(uploadedFile);
-                  setIsConfiguring(false);
-                  setWorkbook(null);
-                }}
-              />
-            ) : (
-              <div className="space-y-4 p-4 bg-muted/30 rounded-lg border border-border">
-                <div className="space-y-2">
-                  <Label htmlFor="sheet-select">Selecionar Página/Aba:</Label>
-                  <Select
-                    value={selectedSheetIndex?.toString() ?? ''}
-                    onValueChange={(value) => setSelectedSheetIndex(parseInt(value))}
-                  >
-                    <SelectTrigger id="sheet-select">
-                      <SelectValue placeholder="Selecione uma aba" />
-                    </SelectTrigger>
-                    <SelectContent>
-                      {workbook.SheetNames.map((sheetName, index) => (
-                        <SelectItem key={index} value={index.toString()}>
-                          Página {index + 1}: {sheetName}
-                        </SelectItem>
-                      ))}
-                    </SelectContent>
-                  </Select>
-                </div>
-
-                <div className="space-y-2">
-                  <Label htmlFor="start-cell">Célula Inicial (ex: A5):</Label>
-                  <Input
-                    id="start-cell"
-                    type="text"
-                    value={startCell}
-                    onChange={(e) => setStartCell(e.target.value.toUpperCase())}
-                    placeholder="A1"
-                    pattern="[A-Z]+[0-9]+"
-                  />
-                  <p className="text-xs text-muted-foreground">
-                    Digite a célula onde começam os dados. O cabeçalho será a linha anterior.
-                  </p>
-                </div>
-
-                <div className="flex gap-2">
-                  <Button onClick={processDataFromCell} className="flex-1">
-                    <Search className="h-4 w-4 mr-2" />
-                    Processar Dados
-                  </Button>
-                  <Button onClick={handleCancel} variant="outline">
-                    Cancelar
-                  </Button>
-                </div>
-              </div>
-            )}
-          </>
+          <PageManager
+            workbook={workbook}
+            fileName={fileName}
+            type={type}
+            initialPagesConfig={initialPagesConfig}
+            onPagesConfigChange={(pages: PageConfig[]) => {
+              if (onPagesConfigChange) {
+                onPagesConfigChange(pages);
+              }
+            }}
+            onFileReady={handleFileReady}
+          />
         ) : !file ? (
           <label className="flex flex-col items-center justify-center gap-2 p-8 border-2 border-dashed border-border rounded-lg cursor-pointer hover:bg-muted/50 transition-colors disabled:opacity-50 disabled:cursor-not-allowed">
             {isLoading ? (
@@ -620,10 +305,23 @@ export const FileUpload = ({ type, file, onFileUpload, onFileRemove, onPagesConf
             />
           </label>
         ) : (
-          <div className="space-y-2 p-4 bg-muted/30 rounded-lg">
-            <div className="flex items-center gap-2">
-              <FileSpreadsheet className="h-4 w-4 text-success" />
-              <span className="text-sm font-medium text-foreground truncate">{file.name}</span>
+          <div className="space-y-3 p-4 bg-muted/30 rounded-lg">
+            <div className="flex items-center justify-between">
+              <div className="flex items-center gap-2">
+                <FileSpreadsheet className="h-4 w-4 text-success" />
+                <span className="text-sm font-medium text-foreground truncate">{file.name}</span>
+              </div>
+              {workbook && (
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={handleEditConfig}
+                  className="gap-2"
+                >
+                  <Pencil className="h-4 w-4" />
+                  Editar Configurações
+                </Button>
+              )}
             </div>
             <div className="text-xs text-muted-foreground space-y-1">
               <div>{file.data.length} linhas de dados</div>

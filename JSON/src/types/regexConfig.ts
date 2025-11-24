@@ -4,7 +4,10 @@
 
 export type AplicarRegexTipo = "inicial" | "abaixo";
 
-export type LinhaParadaTipo = "parar_total" | "aplicar_e_parar" | "ignorar_e_continuar";
+export type LinhaParadaTipo =
+  | "parar_total"
+  | "aplicar_e_parar"
+  | "ignorar_e_continuar";
 
 export interface LinhaParada {
   nome: string;
@@ -20,4 +23,3 @@ export interface ConfiguracaoRegex {
   aplicarRegex: AplicarRegexTipo;
   linhaParada?: LinhaParada;
 }
-

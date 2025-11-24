@@ -23,6 +23,8 @@ import {
   Plus,
   AlertCircle,
   Search,
+  Pencil,
+  Check,
 } from "lucide-react";
 
 interface PageManagerProps {
@@ -31,6 +33,7 @@ interface PageManagerProps {
   type: "custo" | "venda" | "gabarito";
   onPagesConfigChange: (pages: PageConfig[]) => void;
   onFileReady: (file: UploadedFile) => void;
+  initialPagesConfig?: PageConfig[]; // Configurações iniciais de páginas
 }
 
 export const PageManager = ({
@@ -39,10 +42,11 @@ export const PageManager = ({
   type,
   onPagesConfigChange,
   onFileReady,
+  initialPagesConfig = [],
 }: PageManagerProps) => {
   const { toast } = useToast();
-  const [selectedPages, setSelectedPages] = useState<number[]>([]);
-  const [pageConfigs, setPageConfigs] = useState<PageConfig[]>([]);
+  const [selectedPages, setSelectedPages] = useState<number[]>(initialPagesConfig.map(p => p.pageIndex));
+  const [pageConfigs, setPageConfigs] = useState<PageConfig[]>(initialPagesConfig);
   const [currentPageIndex, setCurrentPageIndex] = useState<number | null>(null);
   const [currentStartCell, setCurrentStartCell] = useState<string>("A1");
   const [currentColumns, setCurrentColumns] = useState<string[]>([]);
@@ -51,6 +55,8 @@ export const PageManager = ({
   >([]);
   const [currentStopRow, setCurrentStopRow] = useState<number | null>(null);
   const [isReviewing, setIsReviewing] = useState(false);
+  const [editingStartCell, setEditingStartCell] = useState<number | null>(null);
+  const [editStartCellValue, setEditStartCellValue] = useState<string>("");
 
   const handlePageToggle = (pageIndex: number) => {
     setSelectedPages((prev) => {
@@ -261,6 +267,76 @@ export const PageManager = ({
       newPageConfig,
     ];
     onPagesConfigChange(updatedConfigs);
+  };
+
+  const handleEditStartCell = (pageIndex: number) => {
+    const config = pageConfigs.find((p) => p.pageIndex === pageIndex);
+    if (config) {
+      setEditingStartCell(pageIndex);
+      setEditStartCellValue(config.startCell);
+    }
+  };
+
+  const handleSaveStartCell = (pageIndex: number) => {
+    if (!workbook || !editStartCellValue.trim()) return;
+
+    const config = pageConfigs.find((p) => p.pageIndex === pageIndex);
+    if (!config) return;
+
+    // Validar e atualizar célula inicial
+    try {
+      XLSX.utils.decode_cell(editStartCellValue.toUpperCase());
+    } catch (error) {
+      toast({
+        title: "Erro",
+        description: "Célula inicial inválida. Use formato como A5, B10, etc.",
+        variant: "destructive",
+      });
+      return;
+    }
+
+    const newStartCell = editStartCellValue.toUpperCase();
+    const result = loadPageData(pageIndex, newStartCell);
+    
+    if (!result) {
+      toast({
+        title: "Erro",
+        description: "Erro ao carregar dados com a nova célula inicial",
+        variant: "destructive",
+      });
+      return;
+    }
+
+    const updatedConfig: PageConfig = {
+      ...config,
+      startCell: newStartCell,
+      columns: result.columns,
+    };
+
+    setPageConfigs((prev) => {
+      const updated = prev.filter((p) => p.pageIndex !== pageIndex);
+      return [...updated, updatedConfig];
+    });
+
+    setEditingStartCell(null);
+    setEditStartCellValue("");
+
+    // Atualizar configuração de páginas
+    const updatedConfigs = [
+      ...pageConfigs.filter((p) => p.pageIndex !== pageIndex),
+      updatedConfig,
+    ];
+    onPagesConfigChange(updatedConfigs);
+
+    toast({
+      title: "Célula inicial atualizada!",
+      description: `Página ${pageIndex + 1} atualizada: ${newStartCell}`,
+    });
+  };
+
+  const handleCancelEditStartCell = () => {
+    setEditingStartCell(null);
+    setEditStartCellValue("");
   };
 
   const handleReapplyPattern = () => {
@@ -707,14 +783,58 @@ export const PageManager = ({
                   key={config.pageIndex}
                   className="flex items-center justify-between p-3 border rounded-lg bg-muted/30"
                 >
-                  <div>
+                  <div className="flex-1">
                     <div className="font-medium">
                       Página {config.pageIndex + 1}: {config.pageName}
                     </div>
-                    <div className="text-xs text-muted-foreground">
-                      Início: {config.startCell} • {config.columns.length}{" "}
-                      colunas
-                      {config.stopRow && ` • Parar na linha: ${config.stopRow}`}
+                    <div className="text-xs text-muted-foreground mt-1">
+                      {editingStartCell === config.pageIndex ? (
+                        <div className="flex items-center gap-2 mt-2">
+                          <Label htmlFor={`edit-cell-${config.pageIndex}`} className="text-xs">
+                            Célula Inicial:
+                          </Label>
+                          <Input
+                            id={`edit-cell-${config.pageIndex}`}
+                            type="text"
+                            value={editStartCellValue}
+                            onChange={(e) =>
+                              setEditStartCellValue(e.target.value.toUpperCase())
+                            }
+                            placeholder="A5"
+                            className="h-7 w-24 text-xs"
+                            onKeyDown={(e) => {
+                              if (e.key === "Enter") {
+                                handleSaveStartCell(config.pageIndex);
+                              } else if (e.key === "Escape") {
+                                handleCancelEditStartCell();
+                              }
+                            }}
+                            autoFocus
+                          />
+                          <Button
+                            variant="ghost"
+                            size="sm"
+                            onClick={() => handleSaveStartCell(config.pageIndex)}
+                            className="h-7 px-2"
+                          >
+                            <Check className="h-3 w-3" />
+                          </Button>
+                          <Button
+                            variant="ghost"
+                            size="sm"
+                            onClick={handleCancelEditStartCell}
+                            className="h-7 px-2"
+                          >
+                            <X className="h-3 w-3" />
+                          </Button>
+                        </div>
+                      ) : (
+                        <span>
+                          Início: <span className="font-medium">{config.startCell}</span> • {config.columns.length}{" "}
+                          colunas
+                          {config.stopRow && ` • Parar na linha: ${config.stopRow}`}
+                        </span>
+                      )}
                     </div>
                   </div>
                   <div className="flex gap-2">

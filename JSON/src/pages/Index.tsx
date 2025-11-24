@@ -32,6 +32,7 @@ import {
   OPTIONAL_COLUMNS,
   VARIATION_COLUMN,
   IMMUTABLE_OPTIONAL_COLUMNS,
+  MERGE_COLUMNS,
 } from "@/config/requiredColumns";
 
 const addImmutableOptionalDefaults = (
@@ -78,162 +79,12 @@ const Index = () => {
   const [vendaPagesConfig, setVendaPagesConfig] = useState<PageConfig[]>([]);
   const [regexConfig, setRegexConfig] = useState<any>(null);
 
-  // Usar as colunas obrigatórias predefinidas
-  const requiredColumns = Array.from(REQUIRED_COLUMNS);
+  // Usar as colunas obrigatórias predefinidas, excluindo as colunas de merge (CUSTO e PRECO1)
+  const requiredColumns = Array.from(REQUIRED_COLUMNS).filter(
+    (col) => !MERGE_COLUMNS.includes(col as any)
+  );
   const allColumns = Array.from(ALL_COLUMNS);
   const optionalColumns = Array.from(OPTIONAL_COLUMNS);
-
-  // Função para processar novas variações
-  const handleNovasVariacoes = useCallback(
-    (novasVariacoesString: string) => {
-      // Separar por vírgula e limpar espaços
-      const novasVariacoes = novasVariacoesString
-        .split(",")
-        .map((v) => v.trim().toUpperCase())
-        .filter((v) => v.length > 0);
-
-      if (novasVariacoes.length === 0) {
-        return;
-      }
-
-      // Aplicar para ambas as planilhas se existirem
-      const updatedMappings = [...columnMappings];
-
-      (["custo", "venda"] as const).forEach((sourceFile) => {
-        const file = sourceFile === "custo" ? custoFile : vendaFile;
-        if (!file) return;
-
-        const existingIndex = updatedMappings.findIndex(
-          (m) =>
-            m.gabaritoColumn === VARIATION_COLUMN && m.sourceFile === sourceFile
-        );
-
-        // Manter o sourceColumn existente (não modificar)
-        let existingSourceColumn: string | string[] | "__EMPTY__" = "__EMPTY__";
-        if (existingIndex >= 0) {
-          const existingMapping = updatedMappings[existingIndex];
-          existingSourceColumn = existingMapping.sourceColumn || "__EMPTY__";
-        }
-
-        // Combinar novas_variacoes existentes com as novas
-        let combinedNovasVariacoes: string[] = [];
-        if (
-          existingIndex >= 0 &&
-          updatedMappings[existingIndex].novas_variacoes
-        ) {
-          const existingNovas = updatedMappings[existingIndex]
-            .novas_variacoes!.split(",")
-            .map((v) => v.trim().toUpperCase())
-            .filter((v) => v.length > 0);
-          combinedNovasVariacoes = [...existingNovas];
-        }
-
-        // Adicionar apenas as novas variações que não existem
-        novasVariacoes.forEach((nova) => {
-          if (!combinedNovasVariacoes.includes(nova)) {
-            combinedNovasVariacoes.push(nova);
-          }
-        });
-
-        // Criar ou atualizar mapeamento
-        // IMPORTANTE: sourceColumn não é modificado, apenas novas_variacoes
-        const newMapping: ColumnMapping = {
-          gabaritoColumn: VARIATION_COLUMN,
-          sourceColumn: existingSourceColumn, // Mantém o que já existe
-          sourceFile,
-          novas_variacoes: combinedNovasVariacoes.join(","),
-        };
-
-        if (existingIndex >= 0) {
-          updatedMappings[existingIndex] = newMapping;
-        } else {
-          updatedMappings.push(newMapping);
-        }
-      });
-
-      setColumnMappings(updatedMappings);
-    },
-    [columnMappings, custoFile, vendaFile]
-  );
-
-  // Função para remover uma variação individual
-  const handleRemoverVariacaoIndividual = useCallback(
-    (variacaoParaRemover: string) => {
-      const updatedMappings = columnMappings.map((mapping) => {
-        // Se é a coluna COR e tem novas_variacoes
-        if (
-          mapping.gabaritoColumn === VARIATION_COLUMN &&
-          mapping.novas_variacoes
-        ) {
-          const novasVariacoes = mapping.novas_variacoes
-            .split(",")
-            .map((v) => v.trim().toUpperCase())
-            .filter((v) => v.length > 0);
-
-          // Remover a variação específica da lista de novas_variacoes
-          const novasVariacoesAtualizadas = novasVariacoes.filter(
-            (v) => v !== variacaoParaRemover.toUpperCase()
-          );
-
-          // IMPORTANTE: Não modificar sourceColumn, apenas novas_variacoes
-          // Se ainda há novas variações, manter o campo, senão remover
-          if (novasVariacoesAtualizadas.length > 0) {
-            return {
-              ...mapping,
-              novas_variacoes: novasVariacoesAtualizadas.join(","),
-            };
-          } else {
-            return {
-              ...mapping,
-              novas_variacoes: undefined,
-            };
-          }
-        }
-        return mapping;
-      });
-
-      setColumnMappings(updatedMappings);
-    },
-    [columnMappings]
-  );
-
-  // Função para limpar todas as variações adicionadas via novas_variacoes
-  const handleLimparNovasVariacoes = useCallback(() => {
-    const updatedMappings = columnMappings.map((mapping) => {
-      // Se é a coluna COR e tem novas_variacoes, remover apenas o campo novas_variacoes
-      if (
-        mapping.gabaritoColumn === VARIATION_COLUMN &&
-        mapping.novas_variacoes
-      ) {
-        // IMPORTANTE: Não modificar sourceColumn, apenas remover novas_variacoes
-        return {
-          ...mapping,
-          novas_variacoes: undefined,
-        };
-      }
-      return mapping;
-    });
-
-    setColumnMappings(updatedMappings);
-  }, [columnMappings]);
-
-  // Obter todas as variações adicionadas via novas_variacoes (únicas)
-  const novasVariacoesAdicionadas = useMemo(() => {
-    const todasVariacoes = new Set<string>();
-    columnMappings.forEach((mapping) => {
-      if (
-        mapping.gabaritoColumn === VARIATION_COLUMN &&
-        mapping.novas_variacoes
-      ) {
-        const variacoes = mapping.novas_variacoes
-          .split(",")
-          .map((v) => v.trim().toUpperCase())
-          .filter((v) => v.length > 0);
-        variacoes.forEach((v) => todasVariacoes.add(v));
-      }
-    });
-    return Array.from(todasVariacoes);
-  }, [columnMappings]);
 
   // Verificar quantas colunas obrigatórias foram mapeadas (contar apenas colunas únicas válidas)
   const mappedRequiredColumns = (() => {
@@ -249,8 +100,12 @@ const Index = () => {
     });
 
     mappingsByColumn.forEach((mappings, gabaritoColumn) => {
-      // Verificar se é uma coluna obrigatória
-      if (!REQUIRED_COLUMNS.includes(gabaritoColumn as any)) return;
+      // Verificar se é uma coluna obrigatória (excluindo colunas de merge)
+      if (
+        !REQUIRED_COLUMNS.includes(gabaritoColumn as any) ||
+        MERGE_COLUMNS.includes(gabaritoColumn as any)
+      )
+        return;
 
       // Para a coluna COR, verificar se há variações selecionadas via checkbox ou adicionadas individualmente
       if (gabaritoColumn === VARIATION_COLUMN) {
@@ -324,13 +179,13 @@ const Index = () => {
     return Array.from(mappedColumns);
   })();
   const requiredMappingProgress =
-    (mappedRequiredColumns.length / REQUIRED_COLUMNS.length) * 100;
+    (mappedRequiredColumns.length / requiredColumns.length) * 100;
 
   const canProceedToStep2 = true; // Sempre pode prosseguir pois temos o gabarito padrão
   const canProceedToStep3 = custoFile !== null || vendaFile !== null;
   const canProceedToStep4 =
     canProceedToStep3 &&
-    mappedRequiredColumns.length === REQUIRED_COLUMNS.length;
+    mappedRequiredColumns.length === requiredColumns.length;
   const canGenerate =
     canProceedToStep4 &&
     custoFile &&
@@ -348,6 +203,27 @@ const Index = () => {
         !!custoFile,
         !!vendaFile
       );
+
+      // Adicionar automaticamente as colunas CUSTO e PRECO1 no formato MERGE
+      // Remover essas colunas se já existirem no mapeamento (para garantir o formato correto)
+      const mergedMappings = finalColumnMappings.filter(
+        (m) => !MERGE_COLUMNS.includes(m.gabaritoColumn as any)
+      );
+
+      // Adicionar CUSTO e PRECO1 no formato especificado
+      const mergeColumnsMappings: ColumnMapping[] = MERGE_COLUMNS.map(
+        (col) => ({
+          gabaritoColumn: col,
+          sourceColumn: "__EMPTY__",
+          sourceFile: "custo" as const,
+          name: "MERGE",
+        })
+      );
+
+      const finalMappingsWithMerge = [
+        ...mergedMappings,
+        ...mergeColumnsMappings,
+      ];
 
       // Adicionar páginas de custo (se houver)
       if (custoPagesConfig.length > 0) {
@@ -395,8 +271,10 @@ const Index = () => {
             },
           }),
         },
-        columnMapping: finalColumnMappings,
-        mergeConfig: mergeConfig || undefined,
+        columnMapping: finalMappingsWithMerge,
+        mergeConfig: mergeConfig
+          ? { ...mergeConfig, how: "inner", includeVariationKey: true }
+          : undefined,
         colorColumn: VARIATION_COLUMN,
         pages: allPages.length > 0 ? allPages : undefined, // Incluir páginas se houver
       };
@@ -421,7 +299,7 @@ const Index = () => {
     {
       number: 2,
       title: "Mapeamento de Colunas",
-      completed: mappedRequiredColumns.length === REQUIRED_COLUMNS.length,
+      completed: mappedRequiredColumns.length === requiredColumns.length,
     },
     { number: 3, title: "Configuração de Merge", completed: canGenerate },
   ];
@@ -494,10 +372,9 @@ const Index = () => {
               <div>
                 <strong className="text-foreground">Gabarito Padrão:</strong>
                 <span className="text-muted-foreground ml-2">
-                  {REQUIRED_COLUMNS.length} colunas obrigatórias |{" "}
-                  {OPTIONAL_COLUMNS.length} colunas opcionais |{" "}
-                  {ALL_COLUMNS.length} colunas totais | Coluna de variação:{" "}
-                  {VARIATION_COLUMN}
+                  6 colunas obrigatórias | {OPTIONAL_COLUMNS.length} colunas
+                  opcionais | {ALL_COLUMNS.length} colunas totais | Coluna de
+                  variação: {VARIATION_COLUMN}
                 </span>
               </div>
               <Button
@@ -532,6 +409,7 @@ const Index = () => {
                   setCustoPagesConfig([]);
                 }}
                 onPagesConfigChange={setCustoPagesConfig}
+                initialPagesConfig={custoPagesConfig}
               />
               <FileUpload
                 type="venda"
@@ -542,6 +420,7 @@ const Index = () => {
                   setVendaPagesConfig([]);
                 }}
                 onPagesConfigChange={setVendaPagesConfig}
+                initialPagesConfig={vendaPagesConfig}
               />
             </div>
           </section>
@@ -564,16 +443,16 @@ const Index = () => {
                   }
                   className="bg-success"
                 >
-                  {mappedRequiredColumns.length} / {REQUIRED_COLUMNS.length}{" "}
+                  {mappedRequiredColumns.length} / {requiredColumns.length}{" "}
                   obrigatórias
                 </Badge>
               </div>
-              {mappedRequiredColumns.length < REQUIRED_COLUMNS.length && (
+              {mappedRequiredColumns.length < requiredColumns.length && (
                 <Alert className="border-warning bg-warning/5">
                   <AlertCircle className="h-4 w-4 text-warning" />
                   <AlertDescription className="text-foreground">
                     <strong>Atenção:</strong> Você precisa mapear todas as{" "}
-                    {REQUIRED_COLUMNS.length} colunas obrigatórias antes de
+                    {requiredColumns.length} colunas obrigatórias antes de
                     prosseguir.
                   </AlertDescription>
                 </Alert>
@@ -586,88 +465,6 @@ const Index = () => {
                 onMappingChange={setColumnMappings}
               />
 
-              {/* Campo opcional para novas variações */}
-              {(custoFile || vendaFile) && (
-                <Card className="p-4 border-dashed">
-                  <div className="space-y-3">
-                    <div>
-                      <Label className="text-sm font-medium text-foreground">
-                        Novas variações opcionais (separadas por vírgula)
-                      </Label>
-                      <p className="text-xs text-muted-foreground mt-1">
-                        Adicione novas variações que serão combinadas com as
-                        selecionadas na coluna COR acima.
-                      </p>
-                    </div>
-                    <div className="flex gap-2">
-                      <Input
-                        placeholder="Ex: A6,A2,A1 (opcional)"
-                        onKeyDown={(e) => {
-                          const target = e.target as HTMLInputElement;
-                          if (e.key === "Enter" && target.value.trim()) {
-                            handleNovasVariacoes(target.value.trim());
-                            target.value = "";
-                          }
-                        }}
-                      />
-                      <Button
-                        type="button"
-                        variant="outline"
-                        onClick={(e) => {
-                          const input = e.currentTarget
-                            .previousElementSibling as HTMLInputElement;
-                          const novasVariacoes = input?.value.trim() || "";
-                          if (novasVariacoes) {
-                            handleNovasVariacoes(novasVariacoes);
-                            input.value = "";
-                          }
-                        }}
-                      >
-                        Adicionar
-                      </Button>
-                      {novasVariacoesAdicionadas.length > 0 && (
-                        <Button
-                          type="button"
-                          variant="outline"
-                          onClick={handleLimparNovasVariacoes}
-                        >
-                          Limpar Todas
-                        </Button>
-                      )}
-                    </div>
-                    {novasVariacoesAdicionadas.length > 0 && (
-                      <div className="mt-3 pt-3 border-t">
-                        <Label className="text-xs text-muted-foreground mb-2 block">
-                          Variações adicionadas (
-                          {novasVariacoesAdicionadas.length}):
-                        </Label>
-                        <div className="flex flex-wrap gap-2">
-                          {novasVariacoesAdicionadas.map((variacao) => (
-                            <Badge
-                              key={variacao}
-                              variant="secondary"
-                              className="flex items-center gap-1 pr-1"
-                            >
-                              <span>{variacao}</span>
-                              <button
-                                type="button"
-                                onClick={() =>
-                                  handleRemoverVariacaoIndividual(variacao)
-                                }
-                                className="ml-1 rounded-full hover:bg-destructive/20 p-0.5 transition-colors"
-                                title={`Remover ${variacao}`}
-                              >
-                                <X className="h-3 w-3" />
-                              </button>
-                            </Badge>
-                          ))}
-                        </div>
-                      </div>
-                    )}
-                  </div>
-                </Card>
-              )}
-
               {/* Config Regex Builder - Aparece apenas após anexar planilhas */}
               {(custoFile || vendaFile) && (
                 <div className="pt-6 border-t border-dashed border-border space-y-4">
@@ -678,7 +475,8 @@ const Index = () => {
                     </h3>
                   </div>
                   <p className="text-sm text-muted-foreground">
-                    Configure regras avançadas de regex para processamento dinâmico das linhas.
+                    Configure regras avançadas de regex para processamento
+                    dinâmico das linhas.
                   </p>
                   <ConfigRegexBuilder
                     onChange={(configs) => {
@@ -736,6 +534,7 @@ const Index = () => {
                 vendaFile={vendaFile}
                 config={mergeConfig}
                 onConfigChange={setMergeConfig}
+                columnMappings={columnMappings}
               />
             </section>
           )}
