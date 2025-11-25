@@ -200,6 +200,7 @@ class GeradorJSON:
         
         colunas_source_encontradas = set()
         colunas_source_vazias = set()
+        colunas_com_nome_igual = set()
         outras_colunas = set()
         
         for linha in linhas:
@@ -217,15 +218,21 @@ class GeradorJSON:
                         colunas_source_encontradas.add(coluna_normalizada)
                         if not valor_limpo or valor_limpo == "0" or valor_limpo == "0.0":
                             colunas_source_vazias.add(coluna_normalizada)
+                        # Verificar se o valor é igual ao nome da coluna (header)
+                        elif self.normalizar_nome(valor_limpo) == source_col_normalizada:
+                            colunas_com_nome_igual.add(coluna_normalizada)
                         break
                 
                 if not eh_coluna_source and valor_limpo and valor_limpo != "0" and valor_limpo != "0.0":
                     outras_colunas.add(coluna_normalizada)
         
         if colunas_source_encontradas:
+            # É header se todas as colunas source estão vazias E não há outras colunas
             if len(colunas_source_vazias) == len(colunas_source_encontradas) and not outras_colunas:
                 return True
-            if not outras_colunas:
+            # É header se a maioria das colunas source tem valores iguais aos nomes das colunas
+            # (indicando uma linha de cabeçalho)
+            if len(colunas_com_nome_igual) > 0 and len(colunas_com_nome_igual) >= len(colunas_source_encontradas) * 0.5:
                 return True
         
         return False

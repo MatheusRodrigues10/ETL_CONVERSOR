@@ -295,26 +295,23 @@ class TradutorFinal:
             return valor
 
     def _corrigir_valores(self, df, colunas, valores_padrao):
+        # Adicionar colunas faltantes com valores padrão
         for col in colunas:
             if col not in df.columns:
                 df[col] = valores_padrao.get(col, '')
 
         invalidos = {'', None, np.nan, 'NaN', 'nan', 'undefined', 'null', 'NULL', 'None'}
 
-        colunas_numericas = ['CUSTO', 'PRECO1', 'PRECO2', 'PRECO3', 'PRECO4', 'PRECO5',
-                            'PESO', 'ALTURA', 'LARGURA', 'PROFUNDIDADE', 'COMPRIMENTO',
-                            'QTDE_MAX_VENDA', 'FATOR_CA', 'FATOR_AU']
-
-        for col in colunas:
-            if col in colunas_numericas:
+        # Formatar apenas PRECO1 e CUSTO
+        colunas_formatar = ['CUSTO', 'PRECO1']
+        
+        for col in colunas_formatar:
+            if col in df.columns:
                 df[col] = df[col].apply(
                     lambda v: self._formatar_numero_brasileiro(v) if not (pd.isna(v) or str(v).strip() in invalidos) else valores_padrao.get(col, '')
                 )
-            else:
-                df[col] = df[col].apply(
-                    lambda v: valores_padrao.get(col, '') if (pd.isna(v) or str(v).strip() in invalidos) else str(v)
-                )
 
+        # Garantir que todas as colunas do gabarito existam, mas não alterar valores existentes
         df = df[colunas]
         return df
 

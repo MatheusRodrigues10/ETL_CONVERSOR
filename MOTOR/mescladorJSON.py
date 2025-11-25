@@ -2,6 +2,7 @@ import json
 import logging
 from pathlib import Path
 import re
+import unicodedata
 
 class GeradorJSONMesclado:
     def __init__(self, config_path=None, pasta_json='./json_final', pasta_destino='./jsons_mesclados'):
@@ -199,44 +200,124 @@ class GeradorJSONMesclado:
             return nome_venda
         return 'produtos_mesclados'
     
+    def normalizar_string_comparacao(self, texto):
+        """Normaliza string removendo acentos e espaços para comparação"""
+        if not texto:
+            return ""
+        texto = str(texto).strip()
+        # Remover acentos básicos
+        texto = unicodedata.normalize('NFD', texto)
+        texto = ''.join(char for char in texto if unicodedata.category(char) != 'Mn')
+        return texto.lower()
+    
+    def obter_coluna_gabarito_do_key(self, key_value, column_mappings):
+        """
+        Converte o nome da coluna (pode ser original ou do gabarito) para o nome do gabarito.
+        Busca no columnMapping para encontrar o gabaritoColumn correspondente.
+        """
+        if not key_value:
+            return 'DESCRICAO'
+        
+        key_normalizado = self.normalizar_string_comparacao(key_value)
+        
+        # Primeiro, verificar se já é um nome do gabarito (comparar normalizado)
+        for mapping in column_mappings:
+            gabarito_col = mapping.get('gabaritoColumn', '')
+            if self.normalizar_string_comparacao(gabarito_col) == key_normalizado:
+                return gabarito_col.upper()
+        
+        # Se não encontrou, buscar pelo sourceColumn
+        for mapping in column_mappings:
+            source_col = mapping.get('sourceColumn', '')
+            if isinstance(source_col, str) and source_col != "__EMPTY__":
+                if self.normalizar_string_comparacao(source_col) == key_normalizado:
+                    return mapping.get('gabaritoColumn', '').upper()
+        
+        # Se não encontrou, assumir que é o nome do gabarito e retornar em maiúsculas
+        return key_value.upper()
+    
     def mesclar_dados(self, dados_custo, dados_venda):
         merge_config = self.config.get('mergeConfig', {})
+        
+        if not merge_config:
+            logging.warning("mergeConfig não encontrado. Usando valores padrão.")
+            merge_config = {}
+        
+        # Obter columnMapping para mapear chaves
+        column_mappings = self.config.get('columnMapping', [])
+        
+        # Obter as chaves do mergeConfig (podem ser nomes originais ou do gabarito)
+        left_key_raw = merge_config.get('leftKey', 'DESCRICAO')
+        right_key_raw = merge_config.get('rightKey', 'DESCRICAO')
         include_variation = merge_config.get('includeVariationKey', True)
-        additional_keys = merge_config.get('additionalKeys', [])
-
+        how = merge_config.get('how', 'inner')  # Sempre será 'inner', mas mantido para clareza
+        
+        # Converter para nomes do gabarito
+        left_key = self.obter_coluna_gabarito_do_key(left_key_raw, column_mappings)
+        right_key = self.obter_coluna_gabarito_do_key(right_key_raw, column_mappings)
+        
+        # Log para debug
+        logging.info(f"Merge usando leftKey: {left_key} (original: {left_key_raw}), rightKey: {right_key} (original: {right_key_raw}), includeVariation: {include_variation}")
+        
         produtos_mesclados = []
 
-        def gerar_chave(produto):
+        def gerar_chave_left(produto):
+            """Gera chave para o arquivo left (custo) usando leftKey do gabarito"""
             partes = []
-            partes.append(self.normalizar_nome_produto(produto.get('DESCRICAO', '')))
+            
+            # Usar leftKey configurado (nome do gabarito)
+            valor_key = produto.get(left_key, '')
+            partes.append(self.normalizar_nome_produto(valor_key))
 
+            # Adicionar variação (COR) se configurado
             if include_variation:
-                partes.append(self.normalizar_nome_produto(produto.get('COR', '')))
+                cor = produto.get('COR', '')
+                partes.append(self.normalizar_nome_produto(cor))
 
-            for key in additional_keys:
-                partes.append(self.normalizar_nome_produto(produto.get(key, '')))
+            return "|".join(partes)
+        
+        def gerar_chave_right(produto):
+            """Gera chave para o arquivo right (venda) usando rightKey do gabarito"""
+            partes = []
+            
+            # Usar rightKey configurado (nome do gabarito)
+            valor_key = produto.get(right_key, '')
+            partes.append(self.normalizar_nome_produto(valor_key))
+
+            # Adicionar variação (COR) se configurado
+            if include_variation:
+                cor = produto.get('COR', '')
+                partes.append(self.normalizar_nome_produto(cor))
 
             return "|".join(partes)
 
+        # Criar índice de venda usando rightKey
         indice_venda = {}
         for produto_venda in dados_venda:
-            chave = gerar_chave(produto_venda)
-            indice_venda[chave] = produto_venda
+            chave = gerar_chave_right(produto_venda)
+            # Se já existe produto com a mesma chave, manter o primeiro encontrado
+            if chave not in indice_venda:
+                indice_venda[chave] = produto_venda
 
+        # Mesclar dados usando leftKey para custo e rightKey para venda
+        # Inner join: só incluir produtos que existem em ambos
         for produto_custo in dados_custo:
-            chave = gerar_chave(produto_custo)
+            chave = gerar_chave_left(produto_custo)
             produto_mesclado = produto_custo.copy()
 
+            # Inner join: só incluir se houver correspondência
             if chave in indice_venda:
                 produto_venda = indice_venda[chave]
 
+                # Adicionar PRECO1 do produto de venda
                 if 'PRECO1' in produto_venda and produto_venda['PRECO1']:
                     produto_mesclado['PRECO1'] = self.formatar_valor(produto_venda['PRECO1'])
 
-            if 'CUSTO' in produto_mesclado:
-                produto_mesclado['CUSTO'] = self.formatar_valor(produto_mesclado['CUSTO'])
+                # Formatar CUSTO se existir
+                if 'CUSTO' in produto_mesclado:
+                    produto_mesclado['CUSTO'] = self.formatar_valor(produto_mesclado['CUSTO'])
 
-            produtos_mesclados.append(produto_mesclado)
+                produtos_mesclados.append(produto_mesclado)
 
         return produtos_mesclados
 
