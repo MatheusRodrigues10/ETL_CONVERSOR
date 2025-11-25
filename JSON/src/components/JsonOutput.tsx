@@ -16,18 +16,18 @@ import { PandasConfig } from '@/types/spreadsheet';
 
 interface JsonOutputProps {
   config: PandasConfig;
-  regexConfig?: any;
+  separadoresConfig?: any;
 }
 
-export const JsonOutput = ({ config, regexConfig }: JsonOutputProps) => {
+export const JsonOutput = ({ config, separadoresConfig }: JsonOutputProps) => {
   const [copied, setCopied] = useState(false);
   const [isDownloadDialogOpen, setIsDownloadDialogOpen] = useState(false);
   const [fileNameInput, setFileNameInput] = useState('');
   const { toast } = useToast();
 
   // Mesclar os configs em um único objeto
-  const finalConfig = regexConfig && regexConfig.length > 0 
-    ? { ...config, regexConfig }
+  const finalConfig = separadoresConfig && separadoresConfig.separadores && separadoresConfig.separadores.length > 0 
+    ? { ...config, ...separadoresConfig }
     : config;
 
   const jsonString = JSON.stringify(finalConfig, null, 2);

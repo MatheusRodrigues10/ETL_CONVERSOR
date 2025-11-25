@@ -3,7 +3,7 @@ import { FileUpload } from "@/components/FileUpload";
 import { ColumnMapper } from "@/components/ColumnMapper";
 import { MergeConfig } from "@/components/MergeConfig";
 import { JsonOutput } from "@/components/JsonOutput";
-import { ConfigRegexBuilder } from "@/components/ConfigRegexBuilder";
+import { SeparadoresBuilder } from "@/components/SeparadoresBuilder";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
@@ -77,7 +77,7 @@ const Index = () => {
   );
   const [custoPagesConfig, setCustoPagesConfig] = useState<PageConfig[]>([]);
   const [vendaPagesConfig, setVendaPagesConfig] = useState<PageConfig[]>([]);
-  const [regexConfig, setRegexConfig] = useState<any>(null);
+  const [separadoresConfig, setSeparadoresConfig] = useState<any>(null);
 
   // Usar as colunas obrigatórias predefinidas, excluindo as colunas de merge (CUSTO e PRECO1)
   const requiredColumns = Array.from(REQUIRED_COLUMNS).filter(
@@ -465,28 +465,28 @@ const Index = () => {
                 onMappingChange={setColumnMappings}
               />
 
-              {/* Config Regex Builder - Aparece apenas após anexar planilhas */}
+              {/* Separadores Builder - Aparece apenas após anexar planilhas */}
               {(custoFile || vendaFile) && (
                 <div className="pt-6 border-t border-dashed border-border space-y-4">
                   <div className="flex items-center gap-2">
-                    <Badge variant="secondary">Regex Builder</Badge>
+                    <Badge variant="secondary">Separadores</Badge>
                     <h3 className="text-lg font-semibold text-foreground">
-                      Construtor de Configuração Regex
+                      Configuração de Separadores
                     </h3>
                   </div>
                   <p className="text-sm text-muted-foreground">
-                    Configure regras avançadas de regex para processamento
-                    dinâmico das linhas.
+                    Configure separadores para dividir valores em múltiplos itens.
                   </p>
-                  <ConfigRegexBuilder
-                    onChange={(configs) => {
-                      console.log("Configurações regex atualizadas:", configs);
+                  <SeparadoresBuilder
+                    columnMappings={columnMappings}
+                    onChange={(config) => {
+                      console.log("Configuração de separadores atualizada:", config);
                     }}
                     onExport={(json) => {
-                      console.log("JSON Regex exportado:", json);
-                      // Armazenar o regex config como um array parseado
-                      const regexArray = JSON.parse(json);
-                      setRegexConfig(regexArray);
+                      console.log("JSON Separadores exportado:", json);
+                      // Armazenar o separadores config como objeto parseado
+                      const separadoresObj = JSON.parse(json);
+                      setSeparadoresConfig(separadoresObj);
                     }}
                   />
                 </div>
@@ -550,7 +550,7 @@ const Index = () => {
                   JSON Gerado
                 </h2>
               </div>
-              <JsonOutput config={generatedConfig} regexConfig={regexConfig} />
+              <JsonOutput config={generatedConfig} separadoresConfig={separadoresConfig} />
             </section>
           )}
         </div>
