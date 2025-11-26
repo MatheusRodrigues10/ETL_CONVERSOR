@@ -152,21 +152,31 @@ class TradutorFinal:
         return df
     
     def _converter_preco_para_numero(self, valor):
-        if valor is None or pd.isna(valor):
+        if valor is None:
             return None
-        
-        if isinstance(valor, (int, float)):
-            return float(valor)
-        
-        valor_str = str(valor).strip()
-        
-        if valor_str.upper() in ['', 'NAN', 'NONE', 'NULL', 'NA']:
-            return None
-        
+
+        valor_str = str(valor)
+
+        # limpa unicode invisível (NBSP, zero-width, etc)
+        valor_str = valor_str.replace('\xa0', '').replace('\u200b', '').replace('\u200e', '').replace('\u200f', '')
+
+        # remove textos tipo "R$", "USD", " ", TAB, quebras etc
+        valor_str = re.sub(r'[^\d.,]', '', valor_str)
+
+        # casos como ",00" viram "0,00"
+        if valor_str.startswith(','):
+            valor_str = '0' + valor_str
+
+        # se tiver múltiplos '.' mas a vírgula for decimal, remove só separadores
+        if valor_str.count(',') == 1:
+            valor_str = valor_str.replace('.', '')
+
+        # converte vírgula para ponto
+        valor_str = valor_str.replace(',', '.')
+
         try:
-            valor_limpo = valor_str.replace('.', '').replace(',', '.')
-            return float(valor_limpo)
-        except (ValueError, AttributeError):
+            return float(valor_str)
+        except:
             return None
 
     def _linha_tem_preco_valido(self, row):
@@ -182,66 +192,18 @@ class TradutorFinal:
         if 'DESCRICAO' not in df.columns:
             logger.warning("Coluna DESCRICAO nao encontrada. Pulando filtragem.")
             return df
-        
-        def _ambos_precos_validos(custo, preco1):
-            if custo is None or pd.isna(custo):
-                return False
-            
-            if isinstance(custo, str):
-                custo_limpo = custo.strip().replace('.', '').replace(',', '.')
-                if not custo_limpo or custo_limpo.upper() in ['NAN', 'NONE', 'NULL', 'NA']:
-                    return False
-                try:
-                    custo_float = float(custo_limpo)
-                    if custo_float == 0:
-                        return False
-                except (ValueError, AttributeError):
-                    return False
-            elif isinstance(custo, (int, float)):
-                if custo == 0:
-                    return False
-            else:
-                return False
-            
-            if preco1 is None or pd.isna(preco1):
-                return False
-            
-            if isinstance(preco1, str):
-                preco1_limpo = preco1.strip().replace('.', '').replace(',', '.')
-                if not preco1_limpo or preco1_limpo.upper() in ['NAN', 'NONE', 'NULL', 'NA']:
-                    return False
-                try:
-                    preco1_float = float(preco1_limpo)
-                    if preco1_float == 0:
-                        return False
-                except (ValueError, AttributeError):
-                    return False
-            elif isinstance(preco1, (int, float)):
-                if preco1 == 0:
-                    return False
-            else:
-                return False
-            
-            return True
-        
-        df['_ambos_validos'] = df.apply(
-            lambda row: _ambos_precos_validos(row.get('CUSTO'), row.get('PRECO1')), 
-            axis=1
-        )
-        
-        produtos_com_variacao_valida = df[df['_ambos_validos']]['DESCRICAO'].unique()
-        
-        df_filtrado = df[
-            (df['DESCRICAO'].isin(produtos_com_variacao_valida)) & 
-            (df['_ambos_validos'])
+
+        df['_custo_num'] = df['CUSTO'].apply(self._converter_preco_para_numero)
+        df['_preco1_num'] = df['PRECO1'].apply(self._converter_preco_para_numero)
+
+        df_validos = df[
+            ((df['_custo_num'].notna()) & (df['_custo_num'] > 0)) |
+            ((df['_preco1_num'].notna()) & (df['_preco1_num'] > 0))
         ].copy()
-        
-        df_filtrado = df_filtrado.drop(columns=['_ambos_validos'])
-        
-        return df_filtrado
 
+        df_validos = df_validos.drop(columns=['_custo_num', '_preco1_num'], errors='ignore')
 
-
+        return df_validos
 
     def _renumerar_cod_produto(self, df):
         if 'DESCRICAO' not in df.columns:
@@ -295,24 +257,33 @@ class TradutorFinal:
             return valor
 
     def _corrigir_valores(self, df, colunas, valores_padrao):
-        # Adicionar colunas faltantes com valores padrão
+        # adiciona colunas faltantes
         for col in colunas:
             if col not in df.columns:
                 df[col] = valores_padrao.get(col, '')
 
         invalidos = {'', None, np.nan, 'NaN', 'nan', 'undefined', 'null', 'NULL', 'None'}
 
-        # Formatar apenas PRECO1 e CUSTO
+        def formatar_seguro(v, col):
+            num = self._converter_preco_para_numero(v)
+            if num is None:
+                return valores_padrao.get(col, '')
+            return self._formatar_numero_brasileiro(num)
+
+        # formata SOMENTE colunas numéricas
         colunas_formatar = ['CUSTO', 'PRECO1']
-        
+
         for col in colunas_formatar:
             if col in df.columns:
                 df[col] = df[col].apply(
-                    lambda v: self._formatar_numero_brasileiro(v) if not (pd.isna(v) or str(v).strip() in invalidos) else valores_padrao.get(col, '')
+                    lambda v: formatar_seguro(v, col)
+                    if not (pd.isna(v) or str(v).strip() in invalidos)
+                    else valores_padrao.get(col, '')
                 )
 
-        # Garantir que todas as colunas do gabarito existam, mas não alterar valores existentes
+        # garante que todas as colunas existam e respeitem a ordem do gabarito
         df = df[colunas]
+
         return df
 
     def _processar_arquivo_json(self, nome_arquivo_json):

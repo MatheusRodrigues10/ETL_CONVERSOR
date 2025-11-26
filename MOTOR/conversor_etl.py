@@ -111,49 +111,57 @@ class ConversorPlanilhasTXT:
     def processar_pagina_com_config(self, arquivo, nome_aba, pagina_config, tipo_arquivo, config=None):
         if config is None:
             config = self.config
-        
+
         start_cell = pagina_config.get('startCell', 'A1')
         start_row = self.parse_cell_to_row(start_cell)
-        
+        stop_row = pagina_config.get('stopRow', None)
+
         colunas_config = []
         if 'files' in config and tipo_arquivo in config['files']:
             colunas_config = config['files'][tipo_arquivo].get('columns', [])
         elif 'columns' in pagina_config:
             colunas_config = pagina_config['columns']
-        
+
+        skip_rows = start_row - 1 if start_row > 1 else 0
+
+        df = pd.read_excel(
+            arquivo,
+            sheet_name=nome_aba,
+            header=None,
+            skiprows=skip_rows
+        )
+
+        df = df.iloc[1:].reset_index(drop=True)
+
         if colunas_config:
-            skip_rows = start_row - 1
-            df = pd.read_excel(arquivo, sheet_name=nome_aba, header=0, skiprows=skip_rows)
-            
-            num_colunas_config = len(colunas_config)
-            num_colunas_df = len(df.columns)
-            
+            num_cfg = len(colunas_config)
+            num_df = len(df.columns)
+
             novo_nomes = {}
-            for i, col_config in enumerate(colunas_config):
-                if i < num_colunas_df:
-                    col_atual = df.columns[i]
-                    novo_nomes[col_atual] = col_config
-            
+            for i, col_cfg in enumerate(colunas_config):
+                if i < num_df:
+                    novo_nomes[i] = col_cfg
+
             df = df.rename(columns=novo_nomes)
-            
-            if num_colunas_config > num_colunas_df:
-                for i in range(num_colunas_df, num_colunas_config):
+
+            if num_cfg > num_df:
+                for i in range(num_df, num_cfg):
                     df[colunas_config[i]] = None
-            elif num_colunas_config < num_colunas_df:
-                colunas_para_manter = colunas_config
-                colunas_para_remover = [col for col in df.columns if col not in colunas_para_manter]
-                if colunas_para_remover:
-                    df = df.drop(columns=colunas_para_remover)
+            elif num_cfg < num_df:
+                df = df[colunas_config]
         else:
-            skip_rows = start_row - 1 if start_row > 1 else 0
-            df = pd.read_excel(arquivo, sheet_name=nome_aba, header=0, skiprows=skip_rows)
             df.columns = [self.normalizar_coluna(c) for c in df.columns]
-        
-        df = df.dropna(how='all')
+
+        if stop_row:
+            total_linhas_excel = stop_row - start_row + 1
+            if total_linhas_excel > 0:
+                df = df.iloc[:total_linhas_excel]
+
         df = df.dropna(axis=1, how='all')
-        
+
         return df
-        
+
+
     def fase1_conversao_bruta(self):
         arquivos_do_config = list(self.pasta_origem.glob('*.xlsx')) + list(self.pasta_origem.glob('*.xls'))
         
