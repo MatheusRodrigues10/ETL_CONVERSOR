@@ -406,6 +406,10 @@ def main():
     
     gerador = GeradorJSONMesclado()
     gerador.gerar_json_final()
+    
+    from separadorVariacoes import SeparadorVariacoes
+    separador = SeparadorVariacoes()
+    separador.processar_todos()
 
 if __name__ == '__main__':
     main()

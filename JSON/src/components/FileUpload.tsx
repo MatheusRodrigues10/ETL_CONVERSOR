@@ -238,7 +238,7 @@ export const FileUpload = ({ type, file, onFileUpload, onFileRemove, onPagesConf
       case 'gabarito':
         return 'border-accent';
       case 'custo':
-        return 'border-destructive';
+        return 'border-primary';
       case 'venda':
         return 'border-primary';
     }
