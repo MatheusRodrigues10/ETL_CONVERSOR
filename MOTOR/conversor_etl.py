@@ -108,13 +108,18 @@ class ConversorPlanilhasTXT:
             return int(match.group(2))
         return 1
     
+    
     def processar_pagina_com_config(self, arquivo, nome_aba, pagina_config, tipo_arquivo, config=None):
         if config is None:
             config = self.config
 
         start_cell = pagina_config.get('startCell', 'A1')
-        start_row = self.parse_cell_to_row(start_cell)
-        stop_row = pagina_config.get('stopRow', None)
+        start_row = int(''.join(filter(str.isdigit, start_cell)))
+        skip_rows = max(start_row - 1, 0)
+
+        stop_row = pagina_config.get('stopRow')
+        if stop_row is not None:
+            stop_row = int(stop_row)
 
         colunas_config = []
         if 'files' in config and tipo_arquivo in config['files']:
@@ -122,41 +127,29 @@ class ConversorPlanilhasTXT:
         elif 'columns' in pagina_config:
             colunas_config = pagina_config['columns']
 
-        skip_rows = start_row - 1 if start_row > 1 else 0
+        
+        df = pd.read_excel(arquivo, sheet_name=nome_aba, header=0, skiprows=skip_rows)
 
-        df = pd.read_excel(
-            arquivo,
-            sheet_name=nome_aba,
-            header=None,
-            skiprows=skip_rows
-        )
+        if stop_row:
+            limite_final = stop_row - start_row
+            df = df.iloc[:limite_final]
 
         if colunas_config:
-            num_cfg = len(colunas_config)
+            num_conf = len(colunas_config)
             num_df = len(df.columns)
 
-            novo_nomes = {}
-            for i, col_cfg in enumerate(colunas_config):
-                if i < num_df:
-                    novo_nomes[i] = col_cfg
+            novo = {df.columns[i]: colunas_config[i] for i in range(min(num_conf, num_df))}
+            df = df.rename(columns=novo)
 
-            df = df.rename(columns=novo_nomes)
-
-            if num_cfg > num_df:
-                for i in range(num_df, num_cfg):
-                    df[colunas_config[i]] = None
-            elif num_cfg < num_df:
+            if num_conf > num_df:
+                for c in colunas_config[num_df:]:
+                    df[c] = None
+            else:
                 df = df[colunas_config]
         else:
             df.columns = [self.normalizar_coluna(c) for c in df.columns]
 
-        if stop_row:
-            total_linhas_excel = stop_row - start_row + 1
-            if total_linhas_excel > 0:
-                df = df.iloc[:total_linhas_excel]
-
-        df = df.dropna(axis=1, how='all')
-
+        df = df.dropna(how='all').dropna(axis=1, how='all')
         return df
 
 
