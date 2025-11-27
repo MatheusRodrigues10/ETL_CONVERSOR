@@ -131,8 +131,6 @@ class ConversorPlanilhasTXT:
             skiprows=skip_rows
         )
 
-        df = df.iloc[1:].reset_index(drop=True)
-
         if colunas_config:
             num_cfg = len(colunas_config)
             num_df = len(df.columns)

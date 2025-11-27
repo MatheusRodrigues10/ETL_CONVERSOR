@@ -15,3 +15,6 @@ configs/*
 
 logs/*
 !logs/.gitkeep
+
+json_com_rgex/*
+!json_com_rgex/.gitkeep
