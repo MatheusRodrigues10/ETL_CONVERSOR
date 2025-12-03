@@ -282,7 +282,26 @@ class TradutorFinal:
                 )
 
         # garante que todas as colunas existam e respeitem a ordem do gabarito
+        # (isso já é DEPOIS de todas as filtragens e tratamentos)
         df = df[colunas]
+
+        # Agora, para CADA LINHA que SOBROU (itens que passaram em todas as etapas),
+        # se algum campo estiver vazio / NaN / null, preenche com o valor padrão do gabarito
+        for col in colunas:
+            if col in df.columns:
+                df[col] = df[col].apply(
+                    lambda v: valores_padrao.get(col, '')
+                    if (pd.isna(v) or str(v).strip() in invalidos)
+                    else v
+                )
+
+        # Garante que a coluna TAMANHO seja sempre tratada como TEXTO no Excel
+        # (mesmo que venha como número do JSON / DataFrame)
+        if 'TAMANHO' in df.columns:
+            df['TAMANHO'] = df['TAMANHO'].astype(str)
+            df['TAMANHO'] = df['TAMANHO'].replace(
+                ['nan', 'NaN', 'None', 'NONE', 'NULL', 'null'], ''
+            )
 
         return df
 
