@@ -329,7 +329,7 @@ def iniciar_processo():
         usar_regex = messagebox.askyesno(
             "Separador de Variações",
             "Deseja usar o separadorVariacoes.py?\n\n"
-            "Sim = Usa json_com_regex\n"
+            "Sim = Usa json_com_rgex\n"
             "Não = Usa jsons_mesclados"
         )
         
@@ -350,7 +350,7 @@ def iniciar_processo():
                 status_label.config(text="✗ Erro no separador", fg="red")
                 return
             
-            source_folder = os.path.join(MOTOR_PATH, "json_com_regex")
+            source_folder = os.path.join(MOTOR_PATH, "json_com_rgex")
             regex_count = count_files(source_folder, ".json")
         else:
             source_folder = jsons_mesclados_path
